@@ -1,0 +1,26 @@
+[Event "Casual Game"]
+[Site "https://lichess.org/abcdefgh"]
+[Date "2026.10.01"]
+[UTCDate "2026.10.01"]
+[UTCTime "10:00:00"]
+[White "Trainer"]
+[Black "Opponent"]
+[Result "1-0"]
+[Speed "rapid"]
+[ECO "C20"]
+[Opening "King's Pawn Game"]
+[TimeControl "600+0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 1-0
+
+[Event "Casual Game"]
+[Site "https://lichess.org/ijklmnop"]
+[Date "2026.10.02"]
+[UTCDate "2026.10.02"]
+[UTCTime "10:00:00"]
+[White "Opponent"]
+[Black "Trainer"]
+[Result "0-1"]
+[Speed "blitz"]
+
+1. d4 d5 2. c4 e6 0-1
