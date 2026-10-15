@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../shared/api";
 import { Button } from "../../shared/ui/button";
+import SoundSettings from "./SoundSettings";
 
 export default function SettingsPage() {
   const [username, setUsername] = useState("");
@@ -114,6 +115,7 @@ export default function SettingsPage() {
         </div>
       </div>
       {message && <div className="notice">{message}</div>}
+      <SoundSettings />
       <div className="panel settings-panel">
         <div className="section-title">Lichess 账户</div>
         <label>

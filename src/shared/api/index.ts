@@ -12,13 +12,17 @@ import type {
   LichessExportGame,
   LichessSyncState,
 } from "../types";
-export interface EngineAnalysis {
-  fen: string;
+export interface EngineVariation {
+  rank: number;
   depth: number;
   scoreType: "cp" | "mate";
   scoreValue: number;
-  bestMove: string | null;
   pv: string[];
+}
+export interface EngineAnalysis extends Omit<EngineVariation, "rank"> {
+  fen: string;
+  bestMove: string | null;
+  variations: EngineVariation[];
 }
 export const api = {
   importGames: (games: GameImport[]) =>

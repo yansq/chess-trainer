@@ -3,6 +3,7 @@ import { Chessboard } from "react-chessboard";
 import { api } from "../../shared/api";
 import type { Puzzle } from "../../shared/types";
 import { tryMove } from "../../shared/chess/moves";
+import { playMoveSound } from "../../shared/audio/move-sound";
 import { scheduleReview, type Rating } from "./scheduler";
 function clockNow() {
   return Date.now();
@@ -44,6 +45,7 @@ export default function ReviewPage() {
       return false;
     }
     setAttempt(played);
+    playMoveSound(played.san);
     setRevealed(true);
     setMessage(
       current.expectedMoves.includes(played.uci)
@@ -51,6 +53,21 @@ export default function ReviewPage() {
         : "再想想。你可以查看正确答案并给本题评级。",
     );
     return true;
+  }
+  function advanceSolution() {
+    if (!current) return;
+    const next = (solutionStep + 1) % (current.solutionLine.length + 1);
+    if (next > 0 && solutionFen) {
+      const uci = current.solutionLine[solutionStep];
+      const played = tryMove(
+        solutionFen,
+        uci.slice(0, 2),
+        uci.slice(2, 4),
+        uci[4] ?? "q",
+      );
+      if (played) playMoveSound(played.san);
+    }
+    setSolutionStep(next);
   }
   async function rate(rating: Rating) {
     if (!current) return;
@@ -116,14 +133,7 @@ export default function ReviewPage() {
                 {current.solutionLine.length > 0 && (
                   <>
                     <div>参考变化：{current.solutionLine.join(" ")}</div>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setSolutionStep(
-                          (v) => (v + 1) % (current.solutionLine.length + 1),
-                        )
-                      }
-                    >
+                    <button className="secondary" onClick={advanceSolution}>
                       播放变化 {solutionStep}/{current.solutionLine.length}
                     </button>
                   </>

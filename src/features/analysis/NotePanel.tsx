@@ -7,6 +7,7 @@ type Props = {
   moveId: string | null;
   heading: string;
   content: string;
+  temporary?: boolean;
   onSaved: (content: string) => void;
   onError: (message: string) => void;
   onCreatePuzzle: () => void;
@@ -16,6 +17,7 @@ export default function NotePanel({
   moveId,
   heading,
   content,
+  temporary = false,
   onSaved,
   onError,
   onCreatePuzzle,
@@ -24,7 +26,7 @@ export default function NotePanel({
   const [editing, setEditing] = useState(false);
   async function save() {
     try {
-      await api.saveAnnotation(gameId, moveId, draft);
+      if (!temporary) await api.saveAnnotation(gameId, moveId, draft);
       onSaved(draft);
       setEditing(false);
     } catch (e) {
@@ -50,7 +52,9 @@ export default function NotePanel({
             placeholder="记录判断、候选招法、犯错原因…"
           />
           <div className="row-end">
-            <button onClick={() => void save()}>保存笔记</button>
+            <button onClick={() => void save()}>
+              {temporary ? "暂存笔记" : "保存笔记"}
+            </button>
           </div>
         </>
       ) : (

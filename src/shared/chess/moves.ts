@@ -1,4 +1,21 @@
 import { Chess, type Square } from "chess.js";
+export function uciLineToSan(fen: string, line: string[]): string[] {
+  const san: string[] = [];
+  try {
+    const chess = new Chess(fen);
+    for (const uci of line) {
+      const move = chess.move({
+        from: uci.slice(0, 2) as Square,
+        to: uci.slice(2, 4) as Square,
+        promotion: uci[4],
+      });
+      san.push(move.san);
+    }
+  } catch {
+    // Keep the valid prefix if the engine returns an incomplete variation.
+  }
+  return san;
+}
 export function tryMove(
   fen: string,
   from: string,

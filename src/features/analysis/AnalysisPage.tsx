@@ -1,24 +1,60 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
-import { Chess } from "chess.js";
+import { Chess, type Square } from "chess.js";
 import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Check,
+  Copy,
   RotateCcw,
 } from "lucide-react";
 import { api, type EngineAnalysis } from "../../shared/api";
 import type { Game, Puzzle } from "../../shared/types";
-import { normalizeAnswer } from "../../shared/chess/moves";
+import { normalizeAnswer, uciLineToSan } from "../../shared/chess/moves";
+import { playMoveSound, playSound } from "../../shared/audio/move-sound";
 import { classifyMove, type Candidate } from "./blunders";
 import NotePanel from "./NotePanel";
+import MoveList from "./MoveList";
+import {
+  createReviewTree,
+  currentReviewMove,
+  moveNumber,
+  navigateReview,
+  playReviewMove,
+  returnToMainline,
+  reviewLineEnd,
+  selectReviewMove,
+  type ReviewTree,
+} from "./review-tree";
+
+function playReviewSound(previous: ReviewTree, next: ReviewTree) {
+  if (previous.currentId === next.currentId) return;
+  const destination = currentReviewMove(next);
+  const undo =
+    previous.currentId !== null &&
+    currentReviewMove(previous)?.parentId === next.currentId;
+  if (undo || !destination) void playSound("move");
+  else playMoveSound(destination.san);
+}
+
 export default function AnalysisPage() {
   const { id } = useParams();
   const [game, setGame] = useState<Game | null>(null);
-  const [ply, setPly] = useState(0);
+  const [review, setReview] = useState(() => createReviewTree([]));
+  const [selectedSquare, setSelectedSquare] = useState<{
+    fen: string;
+    square: string;
+  } | null>(null);
+  const [promotion, setPromotion] = useState<{
+    fen: string;
+    from: string;
+    to: string;
+  } | null>(null);
   const [flipped, setFlipped] = useState(false);
+  const [copiedFen, setCopiedFen] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [showPuzzle, setShowPuzzle] = useState(false);
@@ -32,12 +68,18 @@ export default function AnalysisPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [batchProgress, setBatchProgress] = useState("");
   useEffect(() => {
+    if (!copiedFen) return;
+    const timer = window.setTimeout(() => setCopiedFen(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedFen]);
+  useEffect(() => {
     if (!id) return;
     api
       .getGame(id)
       .then((g) => {
         setGame(g);
-        setPly(0);
+        setReview(createReviewTree(g.moves));
+        setNotes({});
         setFlipped(g.userColor === "black");
         return api.getAnnotations(id);
       })
@@ -52,23 +94,42 @@ export default function AnalysisPage() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
+        e.defaultPrevented ||
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       )
         return;
-      if (e.key === "ArrowLeft") setPly((p) => Math.max(0, p - 1));
-      if (e.key === "ArrowRight")
-        setPly((p) => Math.min(game?.moves.length ?? 0, p + 1));
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        setSelectedSquare(null);
+        setPromotion(null);
+        const next = navigateReview(
+          review,
+          e.key === "ArrowLeft" ? "back" : "next",
+        );
+        playReviewSound(review, next);
+        setReview(next);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [game]);
-  const currentMove = ply ? game?.moves[ply - 1] : null;
-  const fen =
-    ply === 0
-      ? (game?.moves[0]?.fenBefore ?? new Chess().fen())
-      : (currentMove?.fenAfter ?? new Chess().fen());
+  }, [review]);
+  const currentMove = currentReviewMove(review);
+  const ply = currentMove?.ply ?? 0;
+  const fen = currentMove?.fenAfter ?? review.initialFen;
+  const inBranch = !!currentMove && currentMove.sourceMoveId === null;
+  const lineLength = reviewLineEnd(review)?.ply ?? 0;
+  const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
+  function changeReview(next: ReviewTree) {
+    playReviewSound(review, next);
+    setSelectedSquare(null);
+    setPromotion(null);
+    setReview(next);
+  }
+  function navigate(direction: "start" | "back" | "next" | "end") {
+    changeReview(navigateReview(review, direction));
+  }
   useEffect(() => {
     let active = true;
     const seq = ++requestId.current;
@@ -95,6 +156,39 @@ export default function AnalysisPage() {
       void api.engineStop().catch(() => {});
     };
   }, [fen]);
+  function playMove(from: string, to: string, piece?: string): boolean {
+    const next = playReviewMove(review, from, to, piece);
+    if (!next) return false;
+    if (
+      !piece &&
+      new Chess(fen).get(from as Square)?.type === "p" &&
+      /^[a-h][18]$/.test(to)
+    ) {
+      setPromotion({ fen, from, to });
+      setSelectedSquare(null);
+      return false;
+    }
+    changeReview(next);
+    return true;
+  }
+  function clickSquare(square: string) {
+    if (selected && selected !== square && playMove(selected, square)) return;
+    const chess = new Chess(fen);
+    const piece = chess.get(square as Square);
+    setSelectedSquare(
+      piece?.color === chess.turn() && selected !== square
+        ? { fen, square }
+        : null,
+    );
+  }
+  async function copyFen() {
+    try {
+      await navigator.clipboard.writeText(fen);
+      setCopiedFen(fen);
+    } catch {
+      setMessage("复制 FEN 失败，请重试");
+    }
+  }
   async function detectBlunders() {
     if (!game?.userColor) {
       setMessage(
@@ -186,7 +280,7 @@ export default function AnalysisPage() {
       id: crypto.randomUUID(),
       sourceType: "manual",
       sourceGameId: game.id,
-      sourceMoveId: currentMove?.id ?? null,
+      sourceMoveId: currentMove?.sourceMoveId ?? null,
       fen,
       sideToMove: fen.split(" ")[1] === "w" ? "white" : "black",
       title,
@@ -241,41 +335,77 @@ export default function AnalysisPage() {
               options={{
                 position: fen,
                 boardOrientation: flipped ? "black" : "white",
-                allowDragging: false,
+                allowDragging: true,
+                canDragPiece: ({ piece }) =>
+                  piece.pieceType[0] === fen.split(" ")[1],
+                onPieceDrop: ({ sourceSquare, targetSquare }) =>
+                  targetSquare ? playMove(sourceSquare, targetSquare) : false,
+                onSquareClick: ({ square }) => clickSquare(square),
+                squareStyles: selected
+                  ? { [selected]: { backgroundColor: "#b6a45f" } }
+                  : {},
                 boardStyle: { borderRadius: 4 },
                 darkSquareStyle: { backgroundColor: "#65847d" },
                 lightSquareStyle: { backgroundColor: "#e8dfca" },
               }}
             />
           </div>
+          {promotion?.fen === fen && (
+            <div
+              className="promotion-picker"
+              role="group"
+              aria-label="选择升变棋子"
+            >
+              <span>升变为</span>
+              {(
+                [
+                  ["q", "后"],
+                  ["r", "车"],
+                  ["b", "象"],
+                  ["n", "马"],
+                ] as const
+              ).map(([piece, label]) => (
+                <button
+                  key={piece}
+                  onClick={() => playMove(promotion.from, promotion.to, piece)}
+                >
+                  {label}
+                </button>
+              ))}
+              <button className="secondary" onClick={() => setPromotion(null)}>
+                取消
+              </button>
+            </div>
+          )}
           <div className="board-controls">
             <button
               className="icon-button"
-              onClick={() => setPly(0)}
+              onClick={() => navigate("start")}
               aria-label="回到开局"
             >
               <ChevronsLeft />
             </button>
             <button
               className="icon-button"
-              onClick={() => setPly(Math.max(0, ply - 1))}
+              onClick={() => navigate("back")}
               aria-label="上一步"
             >
               <ChevronLeft />
             </button>
             <span>
-              {ply} / {game.moves.length}
+              {inBranch ? "分支 · " : ""}
+              {ply} / {lineLength}
             </span>
             <button
               className="icon-button"
-              onClick={() => setPly(Math.min(game.moves.length, ply + 1))}
+              onClick={() => navigate("next")}
               aria-label="下一步"
             >
               <ChevronRight />
             </button>
             <button
               className="icon-button"
-              onClick={() => setPly(game.moves.length)}
+              onClick={() => navigate("end")}
               aria-label="跳到终局"
             >
               <ChevronsRight />
@@ -288,39 +418,31 @@ export default function AnalysisPage() {
               <RotateCcw />
             </button>
           </div>
-          <div className="fen">{fen}</div>
+          <div className="board-hint">拖动棋子或点击起点、终点，可试走分支</div>
+          <div className="fen-row">
+            <div className="fen">{fen}</div>
+            <button
+              className="secondary fen-copy"
+              onClick={() => void copyFen()}
+              aria-label="复制当前局面 FEN"
+            >
+              {copiedFen === fen ? <Check size={14} /> : <Copy size={14} />}
+              <span aria-live="polite">
+                {copiedFen === fen ? "已复制" : "复制 FEN"}
+              </span>
+            </button>
+          </div>
         </section>
         <section className="review-col">
-          <div className="panel moves-panel">
-            <div className="section-title">
-              招法 <span>主线</span>
-            </div>
-            <div className="moves-grid">
-              <button
-                className={ply === 0 ? "selected" : ""}
-                onClick={() => setPly(0)}
-              >
-                初始局面
-              </button>
-              {game.moves.map((m) => (
-                <button
-                  key={m.id}
-                  className={ply === m.ply ? "selected" : ""}
-                  onClick={() => setPly(m.ply)}
-                >
-                  <small>
-                    {Math.ceil(m.ply / 2)}
-                    {m.ply % 2 ? "．" : "…"}
-                  </small>
-                  {m.san}
-                </button>
-              ))}
-            </div>
-          </div>
+          <MoveList
+            tree={review}
+            onSelect={(moveId) =>
+              changeReview(selectReviewMove(review, moveId))
+            }
+            onMainline={() => changeReview(returnToMainline(review))}
+          />
           <div className="panel batch-panel">
-            <div className="section-title">
-              失误候选
-            </div>
+            <div className="section-title">失误候选</div>
             <div className="batch-body">
               <button
                 className="secondary"
@@ -358,16 +480,27 @@ export default function AnalysisPage() {
             </div>
             <div className="engine-content">
               {engine && engine.fen === fen ? (
-                <>
-                  <strong>
-                    {engine.scoreType === "mate"
-                      ? `M${engine.scoreValue}`
-                      : `${(engine.scoreValue / 100).toFixed(2)}`}
-                  </strong>
-                  <span>深度 {engine.depth}</span>
-                  <div>推荐 {engine.bestMove ?? "—"}</div>
-                  <small>{engine.pv.join(" ")}</small>
-                </>
+                <ol className="engine-variations" aria-label="推荐招法">
+                  {engine.variations.slice(0, 3).map((variation) => {
+                    const sanLine = uciLineToSan(engine.fen, variation.pv);
+                    return (
+                      <li key={variation.rank}>
+                        <div className="engine-variation-head">
+                          <div>
+                            推荐 {variation.rank} · {sanLine[0] ?? "—"}
+                          </div>
+                          <strong>
+                            {variation.scoreType === "mate"
+                              ? `M${variation.scoreValue}`
+                              : (variation.scoreValue / 100).toFixed(2)}
+                          </strong>
+                          <span>深度 {variation.depth}</span>
+                        </div>
+                        <small>{sanLine.join(" ")}</small>
+                      </li>
+                    );
+                  })}
+                </ol>
               ) : (
                 <span className="muted">
                   {engineStatus || "请在设置中配置 Stockfish 路径"}
@@ -378,16 +511,17 @@ export default function AnalysisPage() {
           <NotePanel
             key={noteKey}
             gameId={game.id}
-            moveId={currentMove?.id ?? null}
+            moveId={currentMove?.sourceMoveId ?? null}
+            temporary={inBranch}
             heading={
               currentMove
-                ? `${Math.ceil(ply / 2)}${ply % 2 ? "．" : "…"} ${currentMove.san} · 招法笔记`
+                ? `${moveNumber(currentMove)} ${currentMove.san} · ${inBranch ? "分支笔记" : "招法笔记"}`
                 : "对局总结"
             }
             content={notes[noteKey] ?? ""}
             onSaved={(content) => {
               setNotes((n) => ({ ...n, [noteKey]: content }));
-              setMessage("笔记已保存");
+              setMessage(inBranch ? "分支笔记已暂存于当前复盘" : "笔记已保存");
             }}
             onError={setMessage}
             onCreatePuzzle={() => setShowPuzzle((v) => !v)}

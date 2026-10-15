@@ -628,7 +628,21 @@ pub fn engine_cache_get(
     version: &str,
     depth: u32,
 ) -> Result<Option<crate::engine::Analysis>, String> {
-    db.query_row("SELECT score_type,score_value,principal_variation FROM engine_analyses WHERE fen=?1 AND engine_name=?2 AND engine_version=?3 AND analysis_config='multipv=1' AND depth=?4",params![fen,path,version,depth],|r|{let pv_json:String=r.get(2)?;let pv:Vec<String>=serde_json::from_str(&pv_json).unwrap_or_default();Ok(crate::engine::Analysis{fen:fen.into(),depth,score_type:r.get(0)?,score_value:r.get(1)?,best_move:pv.first().cloned(),pv})}).optional().map_err(err)
+    let config = format!("multipv={}", crate::engine::MULTIPV);
+    let json: Option<String> = db
+        .query_row(
+            "SELECT principal_variation FROM engine_analyses WHERE fen=?1 AND engine_name=?2 AND engine_version=?3 AND analysis_config=?4 AND depth=?5",
+            params![fen, path, version, config, depth],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(err)?;
+    json.map(|value| {
+        let variations = serde_json::from_str(&value).map_err(err)?;
+        crate::engine::Analysis::from_variations(fen, variations)
+            .ok_or_else(|| "缓存缺少引擎评价".into())
+    })
+    .transpose()
 }
 pub fn engine_cache_save(
     db: &Connection,
@@ -636,13 +650,41 @@ pub fn engine_cache_save(
     version: &str,
     a: &crate::engine::Analysis,
 ) -> Result<(), String> {
-    let pv = serde_json::to_string(&a.pv).map_err(err)?;
-    db.execute("INSERT OR REPLACE INTO engine_analyses(fen,engine_name,engine_version,analysis_config,depth,score_type,score_value,principal_variation) VALUES (?1,?2,?3,'multipv=1',?4,?5,?6,?7)",params![a.fen,path,version,a.depth,a.score_type,a.score_value,pv]).map_err(err)?;
+    let variations = serde_json::to_string(&a.variations).map_err(err)?;
+    let config = format!("multipv={}", crate::engine::MULTIPV);
+    db.execute("INSERT OR REPLACE INTO engine_analyses(fen,engine_name,engine_version,analysis_config,depth,score_type,score_value,principal_variation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![a.fen,path,version,config,a.depth,a.score_type,a.score_value,variations]).map_err(err)?;
     Ok(())
 }
 #[cfg(test)]
 mod persistence_test {
     use super::*;
+    #[test]
+    fn engine_cache_preserves_three_variations_and_ignores_single_pv() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let fen = "start";
+        db.execute("INSERT INTO engine_analyses(fen,engine_name,engine_version,analysis_config,depth,score_type,score_value,principal_variation) VALUES ('start','engine','v1','multipv=1',12,'cp',42,'[\"e2e4\"]')", []).unwrap();
+        assert!(engine_cache_get(&db, fen, "engine", "v1", 12)
+            .unwrap()
+            .is_none());
+        let variations = [
+            "info depth 12 multipv 1 score cp 42 pv e2e4 e7e5",
+            "info depth 12 multipv 2 score cp 30 pv d2d4 d7d5",
+            "info depth 12 multipv 3 score cp 20 pv g1f3 g8f6",
+        ]
+        .iter()
+        .map(|line| crate::engine::parse_info(line, "8/8/8/8/8/8/8/8 w - - 0 1").unwrap())
+        .collect();
+        let analysis = crate::engine::Analysis::from_variations(fen, variations).unwrap();
+        engine_cache_save(&db, "engine", "v1", &analysis).unwrap();
+        let cached = engine_cache_get(&db, fen, "engine", "v1", 12)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(cached).unwrap(),
+            serde_json::to_value(analysis).unwrap()
+        );
+    }
     #[test]
     fn note_survives_reopen() {
         let path =

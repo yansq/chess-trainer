@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, RefreshCw } from "lucide-react";
+import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
 import type { GameFilter, GamePage } from "../../shared/types";
 import { parsePgnCollection } from "./pgn";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
+import { Select } from "../../shared/ui/select";
 import { useLichessSync } from "./sync-store";
 const initial: GameFilter = {
   opponentType: "human",
@@ -17,7 +18,7 @@ const initial: GameFilter = {
   offset: 0,
 };
 function resultLabel(result: string, color: string | null) {
-  if (result === "draw") return "和棋";
+  if (result === "draw") return "和";
   if (!color || result === "unknown") return "未知";
   return result === color ? "胜" : "负";
 }
@@ -83,25 +84,23 @@ export default function GamesPage() {
             />
           </label>
           <button
-            disabled={busy || sync.running}
-            onClick={() => void sync.start()}
+            type="button"
+            className="sync-button"
+            disabled={busy || sync.pausing}
+            onClick={() => {
+              if (sync.running) sync.pause();
+              else void sync.start();
+            }}
           >
-            <RefreshCw size={16} />
-            {sync.running
-              ? "同步中…"
-              : sync.checkpoint?.pending
-                ? "继续同步"
-                : "同步对局"}
+            {sync.running ? <Pause size={16} /> : <RefreshCw size={16} />}
+            {sync.pausing
+              ? "正在暂停…"
+              : sync.running
+                ? "暂停同步"
+                : sync.checkpoint?.pending
+                  ? "继续同步"
+                  : "同步对局"}
           </button>
-          {sync.running && (
-            <button
-              className="secondary"
-              disabled={sync.pausing}
-              onClick={sync.pause}
-            >
-              {sync.pausing ? "正在暂停…" : "暂停同步"}
-            </button>
-          )}
         </div>
       </div>
       {message && <div className="notice">{message}</div>}
@@ -115,46 +114,51 @@ export default function GamesPage() {
           value={filter.opponentType}
           onChange={(opponentType) => change({ opponentType })}
         />
-        <select
+        <Select
+          label="执棋颜色"
           value={filter.color ?? ""}
-          onChange={(e) => change({ color: e.target.value || null })}
-        >
-          <option value="">全部执棋</option>
-          <option value="white">白方</option>
-          <option value="black">黑方</option>
-        </select>
-        <select
+          onValueChange={(color) => change({ color: color || null })}
+          options={[
+            { value: "", label: "全部执棋" },
+            { value: "white", label: "白方" },
+            { value: "black", label: "黑方" },
+          ]}
+        />
+        <Select
+          label="对局结果"
           value={filter.result ?? ""}
-          onChange={(e) => change({ result: e.target.value || null })}
-        >
-          <option value="">全部结果</option>
-          <option value="win">胜</option>
-          <option value="draw">和</option>
-          <option value="loss">负</option>
-        </select>
-        <select
+          onValueChange={(result) => change({ result: result || null })}
+          options={[
+            { value: "", label: "全部结果" },
+            { value: "win", label: "胜" },
+            { value: "draw", label: "和" },
+            { value: "loss", label: "负" },
+          ]}
+        />
+        <Select
+          label="复盘状态"
           value={filter.reviewed === null ? "" : String(filter.reviewed)}
-          onChange={(e) =>
-            change({
-              reviewed:
-                e.target.value === "" ? null : e.target.value === "true",
-            })
+          onValueChange={(reviewed) =>
+            change({ reviewed: reviewed === "" ? null : reviewed === "true" })
           }
-        >
-          <option value="">全部状态</option>
-          <option value="false">未复盘</option>
-          <option value="true">已复盘</option>
-        </select>
-        <select
+          options={[
+            { value: "", label: "全部状态" },
+            { value: "false", label: "未复盘" },
+            { value: "true", label: "已复盘" },
+          ]}
+        />
+        <Select
+          label="对局时限"
           value={filter.speed ?? ""}
-          onChange={(e) => change({ speed: e.target.value || null })}
-        >
-          <option value="">全部时限</option>
-          <option value="bullet">Bullet</option>
-          <option value="blitz">Blitz</option>
-          <option value="rapid">Rapid</option>
-          <option value="classical">Classical</option>
-        </select>
+          onValueChange={(speed) => change({ speed: speed || null })}
+          options={[
+            { value: "", label: "全部时限" },
+            { value: "bullet", label: "Bullet" },
+            { value: "blitz", label: "Blitz" },
+            { value: "rapid", label: "Rapid" },
+            { value: "classical", label: "Classical" },
+          ]}
+        />
         <input
           placeholder="搜索 ECO / 开局"
           value={filter.opening ?? ""}
