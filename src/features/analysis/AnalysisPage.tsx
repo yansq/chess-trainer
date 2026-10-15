@@ -1,43 +1,88 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
-import { Chess } from "chess.js";
+import { Chess, type Square } from "chess.js";
 import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Check,
+  Copy,
   RotateCcw,
 } from "lucide-react";
-import { api, type EngineAnalysis } from "../../shared/api";
+import { api } from "../../shared/api";
+import {
+  startPositionAnalysis,
+  type PositionAnalysis,
+} from "./engine-analysis";
 import type { Game, Puzzle } from "../../shared/types";
-import { normalizeAnswer } from "../../shared/chess/moves";
+import { normalizeAnswer, uciLineToSan } from "../../shared/chess/moves";
+import { playMoveSound, playSound } from "../../shared/audio/move-sound";
 import { classifyMove, type Candidate } from "./blunders";
 import NotePanel from "./NotePanel";
+import MoveList from "./MoveList";
+import {
+  createReviewTree,
+  currentReviewMove,
+  moveNumber,
+  navigateReview,
+  playReviewMove,
+  returnToMainline,
+  reviewLineEnd,
+  selectReviewMove,
+  type ReviewTree,
+} from "./review-tree";
+
+function playReviewSound(previous: ReviewTree, next: ReviewTree) {
+  if (previous.currentId === next.currentId) return;
+  const destination = currentReviewMove(next);
+  const undo =
+    previous.currentId !== null &&
+    currentReviewMove(previous)?.parentId === next.currentId;
+  if (undo || !destination) void playSound("move");
+  else playMoveSound(destination.san);
+}
+
 export default function AnalysisPage() {
   const { id } = useParams();
   const [game, setGame] = useState<Game | null>(null);
-  const [ply, setPly] = useState(0);
+  const [review, setReview] = useState(() => createReviewTree([]));
+  const [selectedSquare, setSelectedSquare] = useState<{
+    fen: string;
+    square: string;
+  } | null>(null);
+  const [promotion, setPromotion] = useState<{
+    fen: string;
+    from: string;
+    to: string;
+  } | null>(null);
   const [flipped, setFlipped] = useState(false);
+  const [copiedFen, setCopiedFen] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [showPuzzle, setShowPuzzle] = useState(false);
   const [title, setTitle] = useState("从当前局面找出好棋");
   const [description, setDescription] = useState("");
   const [answers, setAnswers] = useState("");
-  const [engine, setEngine] = useState<EngineAnalysis | null>(null);
-  const [engineStatus, setEngineStatus] = useState("");
-  const requestId = useRef(0);
+  const [positionAnalysis, setPositionAnalysis] =
+    useState<PositionAnalysis | null>(null);
   const batchCancelled = useRef(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [batchProgress, setBatchProgress] = useState("");
+  useEffect(() => {
+    if (!copiedFen) return;
+    const timer = window.setTimeout(() => setCopiedFen(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedFen]);
   useEffect(() => {
     if (!id) return;
     api
       .getGame(id)
       .then((g) => {
         setGame(g);
-        setPly(0);
+        setReview(createReviewTree(g.moves));
+        setNotes({});
         setFlipped(g.userColor === "black");
         return api.getAnnotations(id);
       })
@@ -52,49 +97,80 @@ export default function AnalysisPage() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
+        e.defaultPrevented ||
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       )
         return;
-      if (e.key === "ArrowLeft") setPly((p) => Math.max(0, p - 1));
-      if (e.key === "ArrowRight")
-        setPly((p) => Math.min(game?.moves.length ?? 0, p + 1));
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        setSelectedSquare(null);
+        setPromotion(null);
+        const next = navigateReview(
+          review,
+          e.key === "ArrowLeft" ? "back" : "next",
+        );
+        playReviewSound(review, next);
+        setReview(next);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [game]);
-  const currentMove = ply ? game?.moves[ply - 1] : null;
-  const fen =
-    ply === 0
-      ? (game?.moves[0]?.fenBefore ?? new Chess().fen())
-      : (currentMove?.fenAfter ?? new Chess().fen());
+  }, [review]);
+  const currentMove = currentReviewMove(review);
+  const ply = currentMove?.ply ?? 0;
+  const fen = currentMove?.fenAfter ?? review.initialFen;
+  const engine =
+    positionAnalysis?.fen === fen ? positionAnalysis.analysis : null;
+  const engineStatus =
+    positionAnalysis?.fen === fen ? positionAnalysis.status : "分析中…";
+  const inBranch = !!currentMove && currentMove.sourceMoveId === null;
+  const lineLength = reviewLineEnd(review)?.ply ?? 0;
+  const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
-  useEffect(() => {
-    let active = true;
-    const seq = ++requestId.current;
-    void api.engineStop().catch(() => {});
-    api
-      .getSetting("engine_path")
-      .then((path) => {
-        if (!active || !path) return;
-        setEngineStatus("分析中…");
-        return api
-          .getSetting("engine_depth")
-          .then((d) => api.engineAnalyze(path, fen, Number(d ?? 14)))
-          .then((result) => {
-            if (active && seq === requestId.current && result)
-              setEngine(result);
-            if (active) setEngineStatus("");
-          });
-      })
-      .catch((e) => {
-        if (active && seq === requestId.current) setEngineStatus(String(e));
-      });
-    return () => {
-      active = false;
-      void api.engineStop().catch(() => {});
-    };
-  }, [fen]);
+  function changeReview(next: ReviewTree) {
+    playReviewSound(review, next);
+    setSelectedSquare(null);
+    setPromotion(null);
+    setReview(next);
+  }
+  function navigate(direction: "start" | "back" | "next" | "end") {
+    changeReview(navigateReview(review, direction));
+  }
+  useEffect(() => startPositionAnalysis(fen, setPositionAnalysis), [fen]);
+  function playMove(from: string, to: string, piece?: string): boolean {
+    const next = playReviewMove(review, from, to, piece);
+    if (!next) return false;
+    if (
+      !piece &&
+      new Chess(fen).get(from as Square)?.type === "p" &&
+      /^[a-h][18]$/.test(to)
+    ) {
+      setPromotion({ fen, from, to });
+      setSelectedSquare(null);
+      return false;
+    }
+    changeReview(next);
+    return true;
+  }
+  function clickSquare(square: string) {
+    if (selected && selected !== square && playMove(selected, square)) return;
+    const chess = new Chess(fen);
+    const piece = chess.get(square as Square);
+    setSelectedSquare(
+      piece?.color === chess.turn() && selected !== square
+        ? { fen, square }
+        : null,
+    );
+  }
+  async function copyFen() {
+    try {
+      await navigator.clipboard.writeText(fen);
+      setCopiedFen(fen);
+    } catch {
+      setMessage("复制 FEN 失败，请重试");
+    }
+  }
   async function detectBlunders() {
     if (!game?.userColor) {
       setMessage(
@@ -162,8 +238,8 @@ export default function AnalysisPage() {
       title: `${c.category} · 第 ${Math.ceil(c.move.ply / 2)} 回合`,
       description: `原招法 ${c.move.san}，胜率损失约 ${(c.loss * 100).toFixed(0)}%。请重新选择。`,
       originalMove: c.move.uci,
-      expectedMoves: [c.before.bestMove!],
-      solutionLine: c.before.pv,
+      expectedMoves: [c.bestMove],
+      solutionLine: c.solutionLine,
       errorCategory: c.category,
     };
     try {
@@ -186,7 +262,7 @@ export default function AnalysisPage() {
       id: crypto.randomUUID(),
       sourceType: "manual",
       sourceGameId: game.id,
-      sourceMoveId: currentMove?.id ?? null,
+      sourceMoveId: currentMove?.sourceMoveId ?? null,
       fen,
       sideToMove: fen.split(" ")[1] === "w" ? "white" : "black",
       title,
@@ -206,15 +282,26 @@ export default function AnalysisPage() {
     }
   }
   if (!id)
-    return <div className="empty full">请从「对局」列表选择一局开始复盘。</div>;
-  if (!game) return <div className="empty full">{message || "加载对局…"}</div>;
+    return (
+      <div className="empty full px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">
+        请从「对局」列表选择一局开始复盘。
+      </div>
+    );
+  if (!game)
+    return (
+      <div className="empty full px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">
+        {message || "加载对局…"}
+      </div>
+    );
   return (
     <>
-      <div className="page-head compact">
+      <div className="page-head compact mb-5 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
         <div>
-          <div className="eyebrow">GAME REVIEW</div>
+          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+            GAME REVIEW
+          </div>
           <h1>
-            {game.whitePlayer} <span className="muted">vs</span>{" "}
+            {game.whitePlayer} <span className="muted text-muted">vs</span>{" "}
             {game.blackPlayer}
           </h1>
           <p>
@@ -224,7 +311,7 @@ export default function AnalysisPage() {
           </p>
         </div>
         <button
-          className="secondary"
+          className="secondary border-control-edge bg-secondary text-secondary-ink"
           onClick={async () => {
             await api.setReviewed(game.id, !game.reviewStatus);
             setGame({ ...game, reviewStatus: !game.reviewStatus });
@@ -233,103 +320,150 @@ export default function AnalysisPage() {
           {game.reviewStatus ? "取消完成" : "标记复盘完成"}
         </button>
       </div>
-      {message && <div className="notice">{message}</div>}
-      <div className="analysis-layout">
-        <section className="board-col">
-          <div className="board-frame">
+      {message && (
+        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+          {message}
+        </div>
+      )}
+      <div className="analysis-layout grid grid-cols-[minmax(400px,590px)_minmax(370px,1fr)] items-start gap-[22px] max-[1150px]:grid-cols-[minmax(320px,1fr)_minmax(320px,1fr)] max-[900px]:grid-cols-1">
+        <section className="board-col max-[900px]:max-w-[640px]">
+          <div className="board-frame w-full overflow-hidden rounded-lg border-8 border-[#223033] shadow-[0_16px_35px_#0004]">
             <Chessboard
               options={{
                 position: fen,
                 boardOrientation: flipped ? "black" : "white",
-                allowDragging: false,
+                allowDragging: true,
+                canDragPiece: ({ piece }) =>
+                  piece.pieceType[0] === fen.split(" ")[1],
+                onPieceDrop: ({ sourceSquare, targetSquare }) =>
+                  targetSquare ? playMove(sourceSquare, targetSquare) : false,
+                onSquareClick: ({ square }) => clickSquare(square),
+                squareStyles: selected
+                  ? {
+                      [selected]: {
+                        backgroundColor: "var(--color-board-selected)",
+                      },
+                    }
+                  : {},
                 boardStyle: { borderRadius: 4 },
-                darkSquareStyle: { backgroundColor: "#65847d" },
-                lightSquareStyle: { backgroundColor: "#e8dfca" },
+                darkSquareStyle: { backgroundColor: "var(--color-board-dark)" },
+                lightSquareStyle: {
+                  backgroundColor: "var(--color-board-light)",
+                },
               }}
             />
           </div>
-          <div className="board-controls">
+          {promotion?.fen === fen && (
+            <div
+              className="promotion-picker flex flex-wrap items-center gap-2 bg-panel p-3"
+              role="group"
+              aria-label="选择升变棋子"
+            >
+              <span>升变为</span>
+              {(
+                [
+                  ["q", "后"],
+                  ["r", "车"],
+                  ["b", "象"],
+                  ["n", "马"],
+                ] as const
+              ).map(([piece, label]) => (
+                <button
+                  key={piece}
+                  onClick={() => playMove(promotion.from, promotion.to, piece)}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                className="secondary border-control-edge bg-secondary text-secondary-ink"
+                onClick={() => setPromotion(null)}
+              >
+                取消
+              </button>
+            </div>
+          )}
+          <div className="board-controls flex items-center justify-center gap-2.5 rounded-b-[9px] border border-panel-edge bg-panel p-3 [&_span]:min-w-[60px] [&_span]:text-center [&_span]:text-[13px] [&_span]:text-[#8da39a]">
             <button
-              className="icon-button"
-              onClick={() => setPly(0)}
+              className="icon-button border-none border-current bg-transparent p-[7px] text-[#b7c9c1] [&_svg]:size-5"
+              onClick={() => navigate("start")}
               aria-label="回到开局"
             >
               <ChevronsLeft />
             </button>
             <button
-              className="icon-button"
-              onClick={() => setPly(Math.max(0, ply - 1))}
+              className="icon-button border-none border-current bg-transparent p-[7px] text-[#b7c9c1] [&_svg]:size-5"
+              onClick={() => navigate("back")}
               aria-label="上一步"
             >
               <ChevronLeft />
             </button>
             <span>
-              {ply} / {game.moves.length}
+              {inBranch ? "分支 · " : ""}
+              {ply} / {lineLength}
             </span>
             <button
-              className="icon-button"
-              onClick={() => setPly(Math.min(game.moves.length, ply + 1))}
+              className="icon-button border-none border-current bg-transparent p-[7px] text-[#b7c9c1] [&_svg]:size-5"
+              onClick={() => navigate("next")}
               aria-label="下一步"
             >
               <ChevronRight />
             </button>
             <button
-              className="icon-button"
-              onClick={() => setPly(game.moves.length)}
+              className="icon-button border-none border-current bg-transparent p-[7px] text-[#b7c9c1] [&_svg]:size-5"
+              onClick={() => navigate("end")}
               aria-label="跳到终局"
             >
               <ChevronsRight />
             </button>
             <button
-              className="icon-button"
+              className="icon-button border-none border-current bg-transparent p-[7px] text-[#b7c9c1] [&_svg]:size-5"
               onClick={() => setFlipped((v) => !v)}
               aria-label="翻转棋盘"
             >
               <RotateCcw />
             </button>
           </div>
-          <div className="fen">{fen}</div>
-        </section>
-        <section className="review-col">
-          <div className="panel moves-panel">
-            <div className="section-title">
-              招法 <span>主线</span>
-            </div>
-            <div className="moves-grid">
-              <button
-                className={ply === 0 ? "selected" : ""}
-                onClick={() => setPly(0)}
-              >
-                初始局面
-              </button>
-              {game.moves.map((m) => (
-                <button
-                  key={m.id}
-                  className={ply === m.ply ? "selected" : ""}
-                  onClick={() => setPly(m.ply)}
-                >
-                  <small>
-                    {Math.ceil(m.ply / 2)}
-                    {m.ply % 2 ? "．" : "…"}
-                  </small>
-                  {m.san}
-                </button>
-              ))}
-            </div>
+          <div className="board-hint mt-3 text-[12px] text-engine-muted">
+            拖动棋子或点击起点、终点，可试走分支
           </div>
-          <div className="panel batch-panel">
-            <div className="section-title">
+          <div className="fen-row mt-3 flex items-center gap-2.5">
+            <div className="fen min-w-0 flex-1 font-chess-mono text-[11px] leading-[normal] text-[#657c77] [overflow-wrap:anywhere]">
+              {fen}
+            </div>
+            <button
+              className="secondary fen-copy border-control-edge bg-secondary text-secondary-ink min-w-[90px] shrink-0 px-2 py-1.5 text-[11px]"
+              onClick={() => void copyFen()}
+              aria-label="复制当前局面 FEN"
+            >
+              {copiedFen === fen ? <Check size={14} /> : <Copy size={14} />}
+              <span aria-live="polite">
+                {copiedFen === fen ? "已复制" : "复制 FEN"}
+              </span>
+            </button>
+          </div>
+        </section>
+        <section className="review-col grid gap-4">
+          <MoveList
+            tree={review}
+            onSelect={(moveId) =>
+              changeReview(selectReviewMove(review, moveId))
+            }
+            onMainline={() => changeReview(returnToMainline(review))}
+          />
+          <div className="panel batch-panel rounded-xl border border-panel-edge bg-panel">
+            <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
               失误候选
             </div>
-            <div className="batch-body">
+            <div className="batch-body flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-[#9cac9f] [&_button]:px-[9px] [&_button]:py-1.5 [&_button]:text-[12px]">
               <button
-                className="secondary"
+                className="secondary border-control-edge bg-secondary text-secondary-ink"
                 onClick={() => void detectBlunders()}
               >
                 分析整局失误
               </button>
               <button
-                className="secondary"
+                className="secondary border-control-edge bg-secondary text-secondary-ink"
                 onClick={() => {
                   batchCancelled.current = true;
                   void api.engineStop();
@@ -340,7 +474,10 @@ export default function AnalysisPage() {
               <span>{batchProgress}</span>
             </div>
             {candidates.map((c) => (
-              <div className="candidate" key={c.move.id}>
+              <div
+                className="candidate flex flex-wrap items-center justify-between gap-2 border-t border-panel-edge px-4 py-3 text-[12px] text-[#9cac9f] [&_button]:px-[9px] [&_button]:py-1.5 [&_button]:text-[12px]"
+                key={c.move.id}
+              >
                 <span>
                   {c.category} · {Math.ceil(c.move.ply / 2)}
                   {c.move.ply % 2 ? "．" : "…"} {c.move.san} · 胜率损失{" "}
@@ -352,24 +489,55 @@ export default function AnalysisPage() {
               </div>
             ))}
           </div>
-          <div className="panel engine-panel">
-            <div className="section-title">
-              Stockfish 分析 <span>白方视角</span>
+          <div className="panel engine-panel rounded-xl border border-panel-edge bg-panel">
+            <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+              Stockfish 分析{" "}
+              <span>
+                白方视角{engineStatus && engine ? ` · ${engineStatus}` : ""}
+              </span>
             </div>
-            <div className="engine-content">
+            <div className="engine-content flex flex-wrap items-center gap-[14px] px-[18px] py-4 text-[13px] [&_strong]:text-[20px] [&_strong]:text-accent-ink [&_span]:text-engine-muted [&_small]:w-full [&_small]:font-chess-mono [&_small]:text-engine-muted [&_small]:[overflow-wrap:anywhere]">
               {engine && engine.fen === fen ? (
-                <>
-                  <strong>
-                    {engine.scoreType === "mate"
-                      ? `M${engine.scoreValue}`
-                      : `${(engine.scoreValue / 100).toFixed(2)}`}
-                  </strong>
-                  <span>深度 {engine.depth}</span>
-                  <div>推荐 {engine.bestMove ?? "—"}</div>
-                  <small>{engine.pv.join(" ")}</small>
-                </>
+                <ol
+                  className="engine-variations m-0 w-full list-none p-0 [&>li+li]:mt-3 [&>li+li]:border-t [&>li+li]:border-control-edge [&>li+li]:pt-3"
+                  aria-label="推荐招法"
+                >
+                  {engine.variations.slice(0, 3).map((variation) => {
+                    const sanLine = uciLineToSan(engine.fen, variation.pv);
+                    const uci = variation.pv[0];
+                    return (
+                      <li key={variation.rank}>
+                        <button
+                          type="button"
+                          className="engine-candidate block w-full rounded-md border border-transparent bg-transparent p-2 text-left whitespace-normal text-inherit [font:inherit] enabled:hover:border-[#3b5a4c] enabled:hover:bg-[#22352d] enabled:hover:filter-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent-ink focus-visible:outline-offset-2"
+                          aria-label={`走推荐 ${variation.rank}：${sanLine[0] ?? "无可用招法"}`}
+                          title={
+                            sanLine[0] ? `在棋盘上走 ${sanLine[0]}` : undefined
+                          }
+                          disabled={!sanLine.length}
+                          onClick={() =>
+                            playMove(uci.slice(0, 2), uci.slice(2, 4), uci[4])
+                          }
+                        >
+                          <div className="engine-variation-head mb-1.5 flex flex-wrap items-center gap-[14px]">
+                            <div>
+                              推荐 {variation.rank} · {sanLine[0] ?? "—"}
+                            </div>
+                            <strong>
+                              {variation.scoreType === "mate"
+                                ? `M${variation.scoreValue}`
+                                : (variation.scoreValue / 100).toFixed(2)}
+                            </strong>
+                            <span>深度 {variation.depth}</span>
+                          </div>
+                          <small>{sanLine.join(" ")}</small>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
               ) : (
-                <span className="muted">
+                <span className="muted text-muted">
                   {engineStatus || "请在设置中配置 Stockfish 路径"}
                 </span>
               )}
@@ -378,23 +546,26 @@ export default function AnalysisPage() {
           <NotePanel
             key={noteKey}
             gameId={game.id}
-            moveId={currentMove?.id ?? null}
+            moveId={currentMove?.sourceMoveId ?? null}
+            temporary={inBranch}
             heading={
               currentMove
-                ? `${Math.ceil(ply / 2)}${ply % 2 ? "．" : "…"} ${currentMove.san} · 招法笔记`
+                ? `${moveNumber(currentMove)} ${currentMove.san} · ${inBranch ? "分支笔记" : "招法笔记"}`
                 : "对局总结"
             }
             content={notes[noteKey] ?? ""}
             onSaved={(content) => {
               setNotes((n) => ({ ...n, [noteKey]: content }));
-              setMessage("笔记已保存");
+              setMessage(inBranch ? "分支笔记已暂存于当前复盘" : "笔记已保存");
             }}
             onError={setMessage}
             onCreatePuzzle={() => setShowPuzzle((v) => !v)}
           />
           {showPuzzle && (
-            <div className="panel puzzle-form">
-              <div className="section-title">创建训练题目</div>
+            <div className="panel puzzle-form rounded-xl border border-panel-edge bg-panel [&_textarea]:m-[15px] [&_textarea]:w-[calc(100%_-_30px)] [&_input]:m-[15px] [&_input]:w-[calc(100%_-_30px)] [&_p]:px-4 [&_p]:text-[13px] [&_p]:text-[#94a7a0]">
+              <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+                创建训练题目
+              </div>
               <p>
                 当前局面由{fen.split(" ")[1] === "w" ? "白方" : "黑方"}
                 走棋。答案可填 SAN 或 UCI，多个答案用逗号隔开。
@@ -415,7 +586,7 @@ export default function AnalysisPage() {
                 onChange={(e) => setAnswers(e.target.value)}
                 placeholder="正确走法，如 Nf3, d2d4"
               />
-              <div className="row-end">
+              <div className="row-end flex justify-end gap-[9px] border-t border-panel-edge px-4 py-3">
                 <button onClick={() => void createPuzzle()}>保存题目</button>
               </div>
             </div>

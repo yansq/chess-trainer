@@ -129,6 +129,8 @@ pub async fn engine_analyze(
     path: String,
     fen: String,
     depth: u32,
+    request_id: Option<String>,
+    on_update: tauri::ipc::Channel<crate::engine::Analysis>,
 ) -> Result<crate::engine::Analysis, String> {
     crate::engine::validate(&path)?;
     let depth = depth.clamp(4, 30);
@@ -142,13 +144,23 @@ pub async fn engine_analyze(
     {
         return Ok(cached);
     }
-    let result = crate::engine::analyze(&manager, &path, &fen, depth).await?;
+    let result = crate::engine::analyze(
+        &manager,
+        &path,
+        &fen,
+        depth,
+        request_id.as_deref(),
+        |analysis| {
+            let _ = on_update.send(analysis);
+        },
+    )
+    .await?;
     repository::engine_cache_save(&*db(&state)?, &path, &version, &result)?;
     Ok(result)
 }
 #[tauri::command]
-pub fn engine_stop(manager: State<'_, crate::engine::EngineManager>) {
-    manager.stop()
+pub fn engine_stop(manager: State<'_, crate::engine::EngineManager>, request_id: Option<String>) {
+    manager.stop(request_id.as_deref())
 }
 
 #[tauri::command]

@@ -35,23 +35,15 @@ export function parsePgn(
     source === "lichess" && externalGameId
       ? `lichess:${externalGameId}`
       : `local:${hash(pgn.trim())}`;
-  const replay = new Chess(
-    headers.SetUp === "1" && headers.FEN ? headers.FEN : undefined,
-  );
-  const moves: Move[] = verbose.map((m, i) => {
-    const fenBefore = replay.fen();
-    const applied = replay.move(m.san);
-    if (!applied) throw new Error(`PGN 第 ${i + 1} 步无效`);
-    return {
-      id: `${id}:${i + 1}`,
-      gameId: id,
-      ply: i + 1,
-      san: applied.san,
-      uci: `${applied.from}${applied.to}${applied.promotion ?? ""}`,
-      fenBefore,
-      fenAfter: replay.fen(),
-    };
-  });
+  const moves: Move[] = verbose.map((m, i) => ({
+    id: `${id}:${i + 1}`,
+    gameId: id,
+    ply: i + 1,
+    san: m.san,
+    uci: `${m.from}${m.to}${m.promotion ?? ""}`,
+    fenBefore: m.before,
+    fenAfter: m.after,
+  }));
   const whitePlayer = headers.White ?? "未知";
   const blackPlayer = headers.Black ?? "未知";
   const userColor =

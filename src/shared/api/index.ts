@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   Game,
   GameImport,
@@ -12,13 +12,16 @@ import type {
   LichessExportGame,
   LichessSyncState,
 } from "../types";
-export interface EngineAnalysis {
-  fen: string;
+export interface EngineVariation {
+  rank: number;
   depth: number;
   scoreType: "cp" | "mate";
   scoreValue: number;
-  bestMove: string | null;
   pv: string[];
+}
+export interface EngineAnalysis {
+  fen: string;
+  variations: EngineVariation[];
 }
 export const api = {
   importGames: (games: GameImport[]) =>
@@ -72,9 +75,24 @@ export const api = {
       games,
       checkpoint,
     }),
-  engineAnalyze: (path: string, fen: string, depth: number) =>
-    invoke<EngineAnalysis>("engine_analyze", { path, fen, depth }),
-  engineStop: () => invoke<void>("engine_stop"),
+  engineAnalyze: (
+    path: string,
+    fen: string,
+    depth: number,
+    requestId?: string,
+    onUpdate?: (analysis: EngineAnalysis) => void,
+  ) => {
+    const channel = new Channel<EngineAnalysis>(onUpdate);
+    return invoke<EngineAnalysis>("engine_analyze", {
+      path,
+      fen,
+      depth,
+      requestId: requestId ?? null,
+      onUpdate: channel,
+    });
+  },
+  engineStop: (requestId?: string) =>
+    invoke<void>("engine_stop", { requestId: requestId ?? null }),
   engineValidate: (path: string) => invoke<void>("engine_validate", { path }),
   saveLichessToken: (username: string, token: string) =>
     invoke<void>("save_lichess_token", { username, token }),

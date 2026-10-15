@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../shared/api";
-import { Button } from "../../shared/ui/button";
+import SoundSettings from "./SoundSettings";
 
 export default function SettingsPage() {
   const [username, setUsername] = useState("");
@@ -107,15 +107,24 @@ export default function SettingsPage() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
         <div>
-          <div className="eyebrow">PREFERENCES</div>
+          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+            PREFERENCES
+          </div>
           <h1>设置</h1>
         </div>
       </div>
-      {message && <div className="notice">{message}</div>}
-      <div className="panel settings-panel">
-        <div className="section-title">Lichess 账户</div>
+      {message && (
+        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+          {message}
+        </div>
+      )}
+      <SoundSettings />
+      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
+        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+          Lichess 账户
+        </div>
         <label>
           用户名
           <input
@@ -133,22 +142,22 @@ export default function SettingsPage() {
             placeholder="输入 Lichess Token"
           />
         </label>
-        <div className="settings-actions">
-          <Button
+        <div className="settings-actions mt-[18px] flex gap-2.5">
+          <button
             disabled={busy || !username.trim()}
             onClick={() => void saveUsername()}
           >
             保存用户名
-          </Button>
+          </button>
           <button
-            className="secondary"
+            className="secondary border-control-edge bg-secondary text-secondary-ink"
             disabled={busy || !username.trim()}
             onClick={() => void testConnection()}
           >
             测试连接
           </button>
           <button
-            className="secondary"
+            className="secondary border-control-edge bg-secondary text-secondary-ink"
             disabled={busy || !username.trim() || !token}
             onClick={() => void saveToken()}
           >
@@ -156,8 +165,10 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
-      <div className="panel settings-panel">
-        <div className="section-title">Stockfish</div>
+      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
+        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+          Stockfish
+        </div>
         <label>
           可执行文件路径
           <input
@@ -176,15 +187,21 @@ export default function SettingsPage() {
             onChange={(e) => setDepth(Number(e.target.value))}
           />
         </label>
-        <div className="settings-actions">
+        <div className="settings-actions mt-[18px] flex gap-2.5">
           <button onClick={() => void saveEngine()}>保存引擎配置</button>
         </div>
       </div>
-      <div className="panel settings-panel">
-        <div className="section-title">失误分类阈值</div>
+      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
+        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+          失误分类阈值
+        </div>
         {(["inaccuracy", "mistake", "blunder"] as const).map((k) => (
           <label key={k}>
-            {{ inaccuracy: "轻微失误", mistake: "失误", blunder: "严重失误" }[k]}
+            {
+              { inaccuracy: "轻微失误", mistake: "失误", blunder: "严重失误" }[
+                k
+              ]
+            }
             （胜率损失 %）
             <input
               type="number"
@@ -197,7 +214,7 @@ export default function SettingsPage() {
             />
           </label>
         ))}
-        <div className="settings-actions">
+        <div className="settings-actions mt-[18px] flex gap-2.5">
           <button onClick={() => void saveThresholds()}>保存阈值</button>
         </div>
       </div>

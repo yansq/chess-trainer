@@ -3,22 +3,23 @@ import type { EngineAnalysis } from "../../shared/api";
 export type Category = "Inaccuracy" | "Mistake" | "Blunder";
 export interface Candidate {
   move: Move;
-  before: EngineAnalysis;
-  after: EngineAnalysis;
+  bestMove: string;
+  solutionLine: string[];
   loss: number;
   category: Category;
 }
 function winChance(a: EngineAnalysis, side: "white" | "black"): number {
+  const { scoreType, scoreValue } = a.variations[0];
   const whiteScore =
-    a.scoreType === "mate"
-      ? a.scoreValue === 0
+    scoreType === "mate"
+      ? scoreValue === 0
         ? a.fen.split(" ")[1] === "w"
           ? -10000
           : 10000
-        : a.scoreValue > 0
+        : scoreValue > 0
           ? 10000
           : -10000
-      : a.scoreValue;
+      : scoreValue;
   const score = side === "white" ? whiteScore : -whiteScore;
   return 1 / (1 + Math.exp(-score / 150));
 }
@@ -30,16 +31,13 @@ export function classifyMove(
   thresholds = { inaccuracy: 0.12, mistake: 0.25, blunder: 0.4 },
 ): Candidate | null {
   const loss = winChance(before, side) - winChance(after, side);
-  if (
-    !before.bestMove ||
-    before.bestMove === move.uci ||
-    loss < thresholds.inaccuracy
-  )
+  const bestMove = before.variations[0].pv[0];
+  if (!bestMove || bestMove === move.uci || loss < thresholds.inaccuracy)
     return null;
   return {
     move,
-    before,
-    after,
+    bestMove,
+    solutionLine: before.variations[0].pv,
     loss,
     category:
       loss >= thresholds.blunder

@@ -2,7 +2,7 @@
 
 ## 已实现
 
-- [x] Tauri 2 / React / TypeScript / Tailwind + shadcn/ui 按钮工程
+- [x] Tauri 2 / React / TypeScript / Tailwind CSS 4 工程，原生按钮与 Radix 下拉组件
 - [x] SQLite 版本化 migration 与仓储接口
 - [x] PGN 导入、去重、服务端列表组合筛选和分页
 - [x] Lichess 用户名、可选 Keychain Token、连接测试、首次全量历史同步、按账号分批增量同步和暂停续传
