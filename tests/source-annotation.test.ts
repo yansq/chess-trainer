@@ -12,6 +12,7 @@ const annotations: [string | null, string][] = [
 ];
 const puzzle: Puzzle = {
   id: "puzzle",
+  category: "opening",
   sourceType: "manual",
   sourceGameId: game.id,
   sourceMoveId: game.moves[0].id,

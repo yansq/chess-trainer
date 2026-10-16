@@ -23,6 +23,7 @@ pub fn run() {
             commands::save_annotation,
             commands::get_annotations,
             commands::set_reviewed,
+            commands::next_puzzle_title,
             commands::save_puzzle,
             commands::list_puzzles,
             commands::get_schedule,

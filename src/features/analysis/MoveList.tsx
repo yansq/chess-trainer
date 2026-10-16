@@ -36,7 +36,7 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
     return (
       <button
         ref={tree.currentId === move.id ? selectedRef : undefined}
-        className={`border-none border-current justify-start font-medium ${compact ? "pgn-move inline-flex gap-[3px] rounded p-[2px_4px] text-[length:inherit] leading-[1.4] align-baseline" : "px-2 py-[9px]"} ${tree.currentId === move.id ? "selected bg-selected text-selected-ink" : "bg-transparent text-[#c4d1cc]"}`}
+        className={`border-none border-current justify-start font-medium ${compact ? "pgn-move inline-flex gap-[3px] rounded p-[2px_4px] text-[length:inherit] leading-[1.4] align-baseline" : "px-2 py-1.5 text-[13px]"} ${tree.currentId === move.id ? "selected bg-selected text-selected-ink" : "bg-transparent text-[#c4d1cc]"}`}
         onClick={() => onSelect(move.id)}
         aria-label={`${move.sourceMoveId ? "主线" : "分支"} ${moveNumber(move)} ${move.san}`}
         aria-current={tree.currentId === move.id ? "step" : undefined}
@@ -126,7 +126,7 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
   const hasBranches = tree.moves.some((move) => move.sourceMoveId === null);
   return (
     <div className="panel moves-panel rounded-xl border border-panel-edge bg-panel">
-      <div className="section-title moves-heading border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d] flex items-center justify-between gap-2 [&_button]:px-[9px] [&_button]:py-[5px] [&_button]:text-[11px]">
+      <div className="section-title moves-heading border-b border-panel-edge px-3 py-2.5 text-[13px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d] flex items-center justify-between gap-2 [&_button]:px-[9px] [&_button]:py-[5px] [&_button]:text-[11px]">
         <div>
           招法{" "}
           <span
@@ -145,12 +145,12 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
         )}
       </div>
       <div
-        className="moves-list relative max-h-[300px] overflow-auto p-3"
+        className="moves-list relative max-h-[clamp(140px,calc(100dvh-480px),240px)] overflow-auto overscroll-contain p-2"
         ref={listRef}
       >
         <button
           ref={tree.currentId === null ? selectedRef : undefined}
-          className={`initial-position mb-1 w-full justify-start border-none border-current px-2 py-[9px] font-medium ${tree.currentId === null ? "selected bg-selected text-selected-ink" : "bg-transparent text-[#c4d1cc]"}`}
+          className={`initial-position mb-1 w-full justify-start border-none border-current px-2 py-1.5 text-[13px] font-medium ${tree.currentId === null ? "selected bg-selected text-selected-ink" : "bg-transparent text-[#c4d1cc]"}`}
           onClick={() => onSelect(null)}
         >
           初始局面

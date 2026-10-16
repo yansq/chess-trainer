@@ -75,6 +75,8 @@ pub struct GamePage {
 #[serde(rename_all = "camelCase")]
 pub struct Puzzle {
     pub id: String,
+    #[serde(default = "default_puzzle_category")]
+    pub category: String,
     pub source_type: String,
     pub source_game_id: Option<String>,
     pub source_move_id: Option<String>,
@@ -86,6 +88,19 @@ pub struct Puzzle {
     pub expected_moves: Vec<String>,
     pub solution_line: Vec<String>,
     pub error_category: Option<String>,
+}
+fn default_puzzle_category() -> String {
+    "opening".into()
+}
+
+fn puzzle_category_label(category: &str) -> Result<&str, String> {
+    match category {
+        "opening" => Ok("开局"),
+        "tactics" => Ok("战术"),
+        "endgame" => Ok("残局"),
+        "other" => Ok("其他"),
+        _ => Err("无效的题目分类".into()),
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -302,18 +317,85 @@ pub fn set_reviewed(db: &Connection, id: &str, reviewed: bool) -> Result<(), Str
     db.execute("UPDATE games SET review_status=?2,reviewed_at=CASE WHEN ?2 THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=?1",params![id,reviewed]).map_err(err)?;
     Ok(())
 }
-pub fn save_puzzle(db: &Connection, p: Puzzle) -> Result<(), String> {
+pub fn next_puzzle_title(
+    db: &Connection,
+    game_id: Option<&str>,
+    category: &str,
+) -> Result<String, String> {
+    let category_label = puzzle_category_label(category)?;
+    let opening: Option<String> = match game_id.filter(|_| category == "opening") {
+        Some(id) => db
+            .query_row("SELECT opening_name FROM games WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .map_err(err)?,
+        None => None,
+    };
+    let family = opening
+        .as_deref()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .trim();
+    let name = if category != "opening" {
+        category_label
+    } else if family.is_empty() {
+        "未知开局"
+    } else {
+        family
+    };
+    let prefix = format!("{name} · ");
+    let mut statement = db
+        .prepare("SELECT title FROM puzzles WHERE substr(title,1,length(?1))=?1 AND category=?2")
+        .map_err(err)?;
+    let titles = statement
+        .query_map(params![prefix, category], |r| r.get::<_, String>(0))
+        .map_err(err)?;
+    let mut highest = 0_u64;
+    for title in titles {
+        let title = title.map_err(err)?;
+        if let Some(number) = title
+            .strip_prefix(&prefix)
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            highest = highest.max(number);
+        }
+    }
+    let next = highest.checked_add(1).ok_or("题目序号已超出范围")?;
+    Ok(format!("{prefix}{next}"))
+}
+
+pub fn save_puzzle(db: &Connection, mut p: Puzzle) -> Result<String, String> {
+    puzzle_category_label(&p.category)?;
+    // The command holds the database mutex while allocating and saving a name.
+    // Blank titles request automatic naming; repeated saves retain their name.
+    if p.title.trim().is_empty() {
+        p.title = match db
+            .query_row(
+                "SELECT title FROM puzzles WHERE id=?1 AND category=?2",
+                params![p.id, p.category],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(err)?
+        {
+            Some(title) if !title.trim().is_empty() => title,
+            _ => next_puzzle_title(db, p.source_game_id.as_deref(), &p.category)?,
+        };
+    }
     let moves = serde_json::to_string(&p.expected_moves).map_err(err)?;
     let line = serde_json::to_string(&p.solution_line).map_err(err)?;
-    db.execute("INSERT INTO puzzles(id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,expected_moves=excluded.expected_moves,solution_line=excluded.solution_line,updated_at=CURRENT_TIMESTAMP",params![p.id,p.source_type,p.source_game_id,p.source_move_id,p.fen,p.side_to_move,p.title,p.description,p.original_move,moves,line,p.error_category]).map_err(err)?;
+    db.execute("INSERT INTO puzzles(id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category,category) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO UPDATE SET category=excluded.category,title=excluded.title,description=excluded.description,expected_moves=excluded.expected_moves,solution_line=excluded.solution_line,updated_at=CURRENT_TIMESTAMP",params![p.id,p.source_type,p.source_game_id,p.source_move_id,p.fen,p.side_to_move,p.title,p.description,p.original_move,moves,line,p.error_category,p.category]).map_err(err)?;
     db.execute("INSERT OR IGNORE INTO review_schedules(puzzle_id,due_at) VALUES (?1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",[&p.id]).map_err(err)?;
-    Ok(())
+    Ok(p.title)
 }
 fn puzzle_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Puzzle> {
     let expected: String = r.get(9)?;
     let solution: String = r.get(10)?;
     Ok(Puzzle {
         id: r.get(0)?,
+        category: r.get(12)?,
         source_type: r.get(1)?,
         source_game_id: r.get(2)?,
         source_move_id: r.get(3)?,
@@ -327,17 +409,22 @@ fn puzzle_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Puzzle> {
         error_category: r.get(11)?,
     })
 }
-const PUZZLE_SELECT:&str="SELECT id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category FROM puzzles";
-pub fn puzzles(db: &Connection, due: bool) -> Result<Vec<Puzzle>, String> {
+const PUZZLE_SELECT:&str="SELECT id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category,category FROM puzzles";
+pub fn puzzles(db: &Connection, due: bool, category: Option<&str>) -> Result<Vec<Puzzle>, String> {
+    if let Some(category) = category {
+        puzzle_category_label(category)?;
+    }
     let sql = if due {
-        format!("{PUZZLE_SELECT} WHERE id IN (SELECT puzzle_id FROM review_schedules WHERE due_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) ORDER BY created_at LIMIT 50")
+        format!("{PUZZLE_SELECT} WHERE (?1 IS NULL OR category=?1) AND id IN (SELECT puzzle_id FROM review_schedules WHERE due_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) ORDER BY created_at LIMIT 50")
     } else {
-        format!("{PUZZLE_SELECT} ORDER BY created_at DESC LIMIT 200")
+        format!(
+            "{PUZZLE_SELECT} WHERE (?1 IS NULL OR category=?1) ORDER BY created_at DESC LIMIT 200"
+        )
     };
     let mut s = db.prepare(&sql).map_err(err)?;
     {
         let result = s
-            .query_map([], puzzle_from_row)
+            .query_map([category], puzzle_from_row)
             .map_err(err)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err);
@@ -578,6 +665,164 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(get_game(&db, "lichess:abcdefgh").unwrap().moves.len(), 1)
     }
+    fn named_puzzle(id: &str, game_id: Option<&str>, title: &str) -> Puzzle {
+        Puzzle {
+            id: id.into(),
+            category: "opening".into(),
+            source_type: "manual".into(),
+            source_game_id: game_id.map(str::to_string),
+            source_move_id: None,
+            fen: "start".into(),
+            side_to_move: "white".into(),
+            title: title.into(),
+            description: "".into(),
+            original_move: None,
+            expected_moves: vec!["e2e4".into()],
+            solution_line: vec!["e2e4".into(), "e7e5".into(), "g1f3".into()],
+            error_category: None,
+        }
+    }
+
+    #[test]
+    fn puzzle_titles_share_opening_family_numbers_and_preserve_custom_names() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let mut game = sample_game();
+        game.opening_name = Some("Sicilian Defense: Najdorf Variation".into());
+        import_games(&mut db, vec![game]).unwrap();
+        let id = Some("lichess:abcdefgh");
+        assert_eq!(
+            next_puzzle_title(&db, id, "opening").unwrap(),
+            "Sicilian Defense · 1"
+        );
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("p1", id, "")).unwrap(),
+            "Sicilian Defense · 1"
+        );
+        db.execute(
+            "UPDATE games SET opening_name='Sicilian Defense: Dragon Variation'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("p2", id, "")).unwrap(),
+            "Sicilian Defense · 2"
+        );
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("p1", id, "")).unwrap(),
+            "Sicilian Defense · 1"
+        );
+        assert_eq!(
+            next_puzzle_title(&db, id, "opening").unwrap(),
+            "Sicilian Defense · 3"
+        );
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("custom", id, "我的训练题")).unwrap(),
+            "我的训练题"
+        );
+        assert_eq!(
+            next_puzzle_title(&db, id, "opening").unwrap(),
+            "Sicilian Defense · 3"
+        );
+        db.execute(
+            "UPDATE games SET opening_name='French Defense: Advance Variation'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("french", id, "")).unwrap(),
+            "French Defense · 1"
+        );
+        let saved = puzzles(&db, false, None).unwrap();
+        assert_eq!(
+            saved.iter().find(|p| p.id == "p1").unwrap().solution_line,
+            vec!["e2e4", "e7e5", "g1f3"]
+        );
+    }
+
+    #[test]
+    fn puzzle_title_numbers_use_full_history_and_unknown_opening_fallback() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        save_puzzle(&db, named_puzzle("high", None, "未知开局 · 250")).unwrap();
+        save_puzzle(&db, named_puzzle("noise", None, "未知开局 · 999 注释")).unwrap();
+        for index in 0..205 {
+            save_puzzle(
+                &db,
+                named_puzzle(&format!("other-{index}"), None, "其他名称"),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            next_puzzle_title(&db, None, "opening").unwrap(),
+            "未知开局 · 251"
+        );
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("next", None, "  ")).unwrap(),
+            "未知开局 · 251"
+        );
+        assert_eq!(
+            save_puzzle(&db, named_puzzle("after", None, "")).unwrap(),
+            "未知开局 · 252"
+        );
+    }
+
+    #[test]
+    fn puzzle_categories_name_independently_and_filter_before_limit() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        for (category, label) in [
+            ("opening", "未知开局"),
+            ("tactics", "战术"),
+            ("endgame", "残局"),
+            ("other", "其他"),
+        ] {
+            let mut p = named_puzzle(category, None, "");
+            p.category = category.into();
+            assert_eq!(save_puzzle(&db, p).unwrap(), format!("{label} · 1"));
+            assert_eq!(
+                next_puzzle_title(&db, None, category).unwrap(),
+                format!("{label} · 2")
+            );
+            assert_eq!(
+                puzzles(&db, false, Some(category)).unwrap()[0].category,
+                category
+            );
+        }
+        for index in 0..205 {
+            save_puzzle(
+                &db,
+                named_puzzle(&format!("opening-{index}"), None, "旧开局题"),
+            )
+            .unwrap();
+        }
+        for category in ["tactics", "endgame", "other"] {
+            assert_eq!(puzzles(&db, false, Some(category)).unwrap().len(), 1);
+        }
+        db.execute(
+            "UPDATE review_schedules SET due_at='2099-01-01' WHERE puzzle_id='endgame'",
+            [],
+        )
+        .unwrap();
+        assert!(puzzles(&db, true, Some("endgame")).unwrap().is_empty());
+        assert_eq!(puzzles(&db, true, Some("tactics")).unwrap().len(), 1);
+        let mut changed = named_puzzle("opening", None, "");
+        changed.category = "tactics".into();
+        assert_eq!(save_puzzle(&db, changed).unwrap(), "战术 · 2");
+        assert_eq!(puzzles(&db, false, Some("tactics")).unwrap().len(), 2);
+        let mut invalid = named_puzzle("invalid", None, "");
+        invalid.category = "invalid".into();
+        assert!(save_puzzle(&db, invalid).is_err());
+        assert!(next_puzzle_title(&db, None, "invalid").is_err());
+        assert!(puzzles(&db, false, Some("invalid")).is_err());
+        let mut legacy = serde_json::to_value(named_puzzle("legacy", None, "Legacy")).unwrap();
+        legacy.as_object_mut().unwrap().remove("category");
+        assert_eq!(
+            serde_json::from_value::<Puzzle>(legacy).unwrap().category,
+            "opening"
+        );
+    }
+
     #[test]
     fn due_queue_and_opening_stats() {
         let mut db = Connection::open_in_memory().unwrap();
@@ -588,6 +833,7 @@ mod tests {
         assert_eq!(stat[0]["scoreRate"], 1.0);
         let p = Puzzle {
             id: "p".into(),
+            category: "opening".into(),
             source_type: "manual".into(),
             source_game_id: Some("lichess:abcdefgh".into()),
             source_move_id: None,
@@ -601,7 +847,7 @@ mod tests {
             error_category: None,
         };
         save_puzzle(&db, p).unwrap();
-        assert_eq!(puzzles(&db, true).unwrap().len(), 1);
+        assert_eq!(puzzles(&db, true, None).unwrap().len(), 1);
         let mut s = schedule(&db, "p").unwrap();
         s.due_at = "2099-01-01T00:00:00.000Z".into();
         record_review(
@@ -615,7 +861,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(puzzles(&db, true).unwrap().is_empty());
+        assert!(puzzles(&db, true, None).unwrap().is_empty());
         let updated = schedule(&db, "p").unwrap();
         assert_eq!(updated.total_attempts, 1);
         assert_eq!(updated.correct_count, 1);

@@ -1,38 +1,68 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../shared/api";
-import { normalizeAnswer } from "../../shared/chess/moves";
-import type { Puzzle } from "../../shared/types";
+import { uciLineToSan } from "../../shared/chess/moves";
+import {
+  PUZZLE_CATEGORIES,
+  type Puzzle,
+  type PuzzleCategory,
+} from "../../shared/types";
+import { Select } from "../../shared/ui/select";
+import { isMultiMovePuzzle, parsePuzzleAnswers } from "./answers";
 
 export default function PuzzlesPage() {
   const [items, setItems] = useState<Puzzle[]>([]);
+  const [category, setCategory] = useState<PuzzleCategory | "">("");
   const [editing, setEditing] = useState<Puzzle | null>(null);
   const [answers, setAnswers] = useState("");
+  const [multiMove, setMultiMove] = useState(false);
   const [message, setMessage] = useState("");
   const nav = useNavigate();
   useEffect(() => {
+    let active = true;
     api
-      .listPuzzles(false)
-      .then(setItems)
-      .catch((e) => setMessage(String(e)));
-  }, []);
+      .listPuzzles(false, category || null)
+      .then((puzzles) => {
+        if (active) setItems(puzzles);
+      })
+      .catch((e) => {
+        if (active) setMessage(String(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [category]);
 
   function startEdit(p: Puzzle) {
     setEditing({ ...p });
-    setAnswers(p.expectedMoves.join(", "));
+    const multi = isMultiMovePuzzle(p);
+    setMultiMove(multi);
+    setAnswers(
+      multi
+        ? uciLineToSan(p.fen, p.solutionLine).join(" ")
+        : p.expectedMoves
+            .map((uci) => uciLineToSan(p.fen, [uci])[0] ?? uci)
+            .join(", "),
+    );
   }
   async function save() {
     if (!editing) return;
-    const raw = answers.split(/[,，\s]+/).filter(Boolean);
-    const moves = raw.map((a) => normalizeAnswer(editing.fen, a));
-    if (!moves.length || moves.some((a) => !a)) {
-      setMessage("至少填写一步合法的 SAN 或 UCI 招法");
-      return;
-    }
     try {
-      const updated = { ...editing, expectedMoves: moves as string[] };
-      await api.savePuzzle(updated);
-      setItems((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+      const parsed = parsePuzzleAnswers(editing.fen, answers, multiMove);
+      const updated = {
+        ...editing,
+        ...parsed,
+        solutionLine:
+          editing.sourceType === "auto"
+            ? editing.solutionLine
+            : parsed.solutionLine,
+      };
+      updated.title = await api.savePuzzle(updated);
+      setItems((list) =>
+        list
+          .map((p) => (p.id === updated.id ? updated : p))
+          .filter((p) => !category || p.category === category),
+      );
       setEditing(null);
       setMessage("题目已更新");
     } catch (e) {
@@ -56,13 +86,27 @@ export default function PuzzlesPage() {
         </div>
       )}
       <div className="panel table-wrap rounded-xl border border-panel-edge bg-panel overflow-hidden">
-        <div className="table-title border-b border-panel-edge px-5 py-[17px] text-[15px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
-          全部题目 <span>{items.length} 道</span>
+        <div className="table-title flex flex-wrap items-center justify-between gap-3 border-b border-panel-edge px-5 py-3 text-[15px] font-bold">
+          <div>
+            {PUZZLE_CATEGORIES.find((option) => option.value === category)
+              ?.label ?? "全部"}
+            题目
+            <span className="ml-2 text-[12px] font-normal text-engine-muted">
+              {items.length} 道
+            </span>
+          </div>
+          <Select<PuzzleCategory | "">
+            label="筛选题目分类"
+            value={category}
+            onValueChange={setCategory}
+            options={[{ value: "", label: "全部分类" }, ...PUZZLE_CATEGORIES]}
+          />
         </div>
         <table>
           <thead>
             <tr>
               <th>题目</th>
+              <th>分类</th>
               <th>答题方</th>
               <th>来源</th>
               <th>类型</th>
@@ -73,6 +117,13 @@ export default function PuzzlesPage() {
             {items.map((p) => (
               <tr key={p.id}>
                 <td>{p.title}</td>
+                <td>
+                  {
+                    PUZZLE_CATEGORIES.find(
+                      (option) => option.value === p.category,
+                    )?.label
+                  }
+                </td>
                 <td>{p.sideToMove === "white" ? "白方" : "黑方"}</td>
                 <td>{p.sourceGameId ?? "独立题目"}</td>
                 <td>{p.sourceType === "manual" ? "手动" : "自动"}</td>
@@ -90,7 +141,9 @@ export default function PuzzlesPage() {
         </table>
         {items.length === 0 && (
           <div className="empty px-5 py-[60px] text-center text-[#829591]">
-            题库为空。请到复盘页面，从一个局面创建题目。
+            {category
+              ? "该分类暂无题目。"
+              : "题库为空。请到复盘页面，从一个局面创建题目。"}
           </div>
         )}
       </div>
@@ -99,6 +152,17 @@ export default function PuzzlesPage() {
           <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
             编辑题目
           </div>
+          <label>
+            分类
+            <Select<PuzzleCategory>
+              label="编辑题目分类"
+              value={editing.category}
+              options={PUZZLE_CATEGORIES}
+              onValueChange={(category) =>
+                setEditing((p) => p && { ...p, category })
+              }
+            />
+          </label>
           <label>
             标题
             <input
@@ -118,9 +182,26 @@ export default function PuzzlesPage() {
               }
             />
           </label>
+          {editing.sourceType === "manual" && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={multiMove}
+              className="secondary border-control-edge bg-secondary px-3 py-2 text-[12px] text-secondary-ink"
+              onClick={() => setMultiMove((value) => !value)}
+            >
+              连续多步：{multiMove ? "开启" : "关闭"}
+            </button>
+          )}
           <label>
-            正确招法（SAN / UCI，逗号分隔）
+            {multiMove
+              ? "连续走法（双方依次走棋，空格分隔）"
+              : "正确招法（SAN / UCI，逗号分隔）"}
             <input
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={multiMove ? "e4 e5 Nf3" : "Nf3, d2d4"}
               value={answers}
               onChange={(e) => setAnswers(e.target.value)}
             />

@@ -42,12 +42,24 @@ pub fn set_reviewed(state: State<Database>, id: String, reviewed: bool) -> Resul
     repository::set_reviewed(&*db(&state)?, &id, reviewed)
 }
 #[tauri::command]
-pub fn save_puzzle(state: State<Database>, puzzle: Puzzle) -> Result<(), String> {
+pub fn next_puzzle_title(
+    state: State<Database>,
+    game_id: String,
+    category: String,
+) -> Result<String, String> {
+    repository::next_puzzle_title(&*db(&state)?, Some(&game_id), &category)
+}
+#[tauri::command]
+pub fn save_puzzle(state: State<Database>, puzzle: Puzzle) -> Result<String, String> {
     repository::save_puzzle(&*db(&state)?, puzzle)
 }
 #[tauri::command]
-pub fn list_puzzles(state: State<Database>, due: bool) -> Result<Vec<Puzzle>, String> {
-    repository::puzzles(&*db(&state)?, due)
+pub fn list_puzzles(
+    state: State<Database>,
+    due: bool,
+    category: Option<String>,
+) -> Result<Vec<Puzzle>, String> {
+    repository::puzzles(&*db(&state)?, due, category.as_deref())
 }
 #[tauri::command]
 pub fn get_schedule(state: State<Database>, id: String) -> Result<Schedule, String> {

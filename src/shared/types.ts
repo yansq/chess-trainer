@@ -59,8 +59,16 @@ export interface GamePage {
   items: Game[];
   total: number;
 }
+export const PUZZLE_CATEGORIES = [
+  { value: "opening", label: "开局" },
+  { value: "tactics", label: "战术" },
+  { value: "endgame", label: "残局" },
+  { value: "other", label: "其他" },
+] as const;
+export type PuzzleCategory = (typeof PUZZLE_CATEGORIES)[number]["value"];
 export interface Puzzle {
   id: string;
+  category: PuzzleCategory;
   sourceType: "manual" | "auto";
   sourceGameId: string | null;
   sourceMoveId: string | null;

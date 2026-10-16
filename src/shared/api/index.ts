@@ -5,6 +5,7 @@ import type {
   GameFilter,
   GamePage,
   Puzzle,
+  PuzzleCategory,
   Schedule,
   ReviewInput,
   OpeningStat,
@@ -34,8 +35,11 @@ export const api = {
     invoke<[string | null, string][]>("get_annotations", { gameId }),
   setReviewed: (id: string, reviewed: boolean) =>
     invoke<void>("set_reviewed", { id, reviewed }),
-  savePuzzle: (puzzle: Puzzle) => invoke<void>("save_puzzle", { puzzle }),
-  listPuzzles: (due: boolean) => invoke<Puzzle[]>("list_puzzles", { due }),
+  nextPuzzleTitle: (gameId: string, category: PuzzleCategory = "opening") =>
+    invoke<string>("next_puzzle_title", { gameId, category }),
+  savePuzzle: (puzzle: Puzzle) => invoke<string>("save_puzzle", { puzzle }),
+  listPuzzles: (due: boolean, category: PuzzleCategory | null = null) =>
+    invoke<Puzzle[]>("list_puzzles", { due, category }),
   getSchedule: (id: string) => invoke<Schedule>("get_schedule", { id }),
   recordReview: (input: ReviewInput) =>
     invoke<void>("record_review", { input }),

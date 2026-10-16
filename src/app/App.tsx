@@ -32,7 +32,6 @@ export default function App() {
           <ChessKnight size={24} />
           <div>
             <strong>Chess Trainer</strong>
-            <small>PERSONAL WORKSPACE</small>
           </div>
         </div>
         <nav className="grid gap-1">
@@ -50,7 +49,9 @@ export default function App() {
           ))}
         </nav>
       </aside>
-      <main className="main col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-[1600px] overflow-auto overscroll-contain px-[42px] pt-[35px] pb-[50px] max-[1150px]:px-[25px] max-[1150px]:py-7">
+      <main
+        className={`main col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-[1600px] overflow-auto overscroll-contain ${reviewingGame ? "px-6 py-5 max-[1150px]:px-5" : "px-[42px] pt-[35px] pb-[50px] max-[1150px]:px-[25px] max-[1150px]:py-7"}`}
+      >
         <Suspense
           fallback={
             <div className="empty full px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">

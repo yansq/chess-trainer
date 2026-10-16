@@ -43,15 +43,30 @@ export function tryMove(
 export function normalizeAnswer(fen: string, answer: string): string | null {
   try {
     const chess = new Chess(fen);
-    const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(answer)
-      ? chess.move({
-          from: answer.slice(0, 2) as Square,
-          to: answer.slice(2, 4) as Square,
-          promotion: answer[4] ?? "q",
-        })
-      : chess.move(answer);
-    return move ? `${move.from}${move.to}${move.promotion ?? ""}` : null;
+    const move = answerMove(chess, answer);
+    return `${move.from}${move.to}${move.promotion ?? ""}`;
   } catch {
     return null;
   }
+}
+function answerMove(chess: Chess, answer: string) {
+  return /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(answer)
+    ? chess.move({
+        from: answer.slice(0, 2) as Square,
+        to: answer.slice(2, 4) as Square,
+        promotion: answer[4] ?? "q",
+      })
+    : chess.move(answer);
+}
+
+export function normalizeAnswerLine(fen: string, answers: string[]): string[] {
+  const chess = new Chess(fen);
+  return answers.map((answer, index) => {
+    try {
+      const move = answerMove(chess, answer);
+      return `${move.from}${move.to}${move.promotion ?? ""}`;
+    } catch {
+      throw new Error(`第 ${index + 1} 步「${answer}」在当前局面不合法`);
+    }
+  });
 }
