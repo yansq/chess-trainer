@@ -203,7 +203,7 @@ export default function GamesPage() {
                 <td>{g.userColor === "white" ? "白" : "黑"}</td>
                 <td>
                   <span
-                    className={`result rounded-[5px] px-2 py-1 ${resultLabel(g.result, g.userColor) === "胜" ? "win bg-[#244736] text-[#acd4b8]" : "bg-[#3b3d33] text-[#e8dfbd]"}`}
+                    className={`result rounded-[5px] px-2 py-1 ${resultLabel(g.result, g.userColor) === "胜" ? "win bg-[#244736] text-[#acd4b8]" : resultLabel(g.result, g.userColor) === "负" ? "loss bg-[#492b2d] text-[#f0a5a5]" : "bg-[#3b3d33] text-[#e8dfbd]"}`}
                   >
                     {resultLabel(g.result, g.userColor)}
                   </span>

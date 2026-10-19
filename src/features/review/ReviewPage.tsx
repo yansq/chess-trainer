@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Chessboard } from "react-chessboard";
+import { Chess, type Square } from "chess.js";
 import { api } from "../../shared/api";
 import type { Puzzle } from "../../shared/types";
 import { tryMove, uciLineToSan } from "../../shared/chess/moves";
@@ -7,13 +8,23 @@ import { playMoveSound } from "../../shared/audio/move-sound";
 import { scheduleReview, type Rating } from "./scheduler";
 import SourceAnnotation from "./SourceAnnotation";
 import { isMultiMovePuzzle } from "../puzzles/answers";
-import { playPuzzleMove, type PuzzleAttempt } from "./attempt";
+import {
+  isWaitingForReply,
+  playPuzzleMove,
+  schedulePuzzleReply,
+  type PuzzleAttempt,
+} from "./attempt";
 function clockNow() {
   return Date.now();
 }
 export default function ReviewPage() {
   const [queue, setQueue] = useState<Puzzle[]>([]);
   const [attempt, setAttempt] = useState<PuzzleAttempt | null>(null);
+  const [selectedSquare, setSelectedSquare] = useState<{
+    puzzleId: string;
+    fen: string;
+    square: string;
+  } | null>(null);
   const [promotion, setPromotion] = useState<{
     from: string;
     to: string;
@@ -29,8 +40,35 @@ export default function ReviewPage() {
       .catch((e) => setMessage(String(e)));
   }, []);
   const current = queue[0];
+  const waitingForReply = isWaitingForReply(attempt);
+  const fen = attempt?.fen ?? current?.fen;
+  const selected =
+    selectedSquare?.puzzleId === current?.id &&
+    selectedSquare?.fen === fen &&
+    !revealed &&
+    !waitingForReply &&
+    !promotion
+      ? selectedSquare?.square
+      : null;
   const correct = attempt?.correct ?? false;
   const multiMove = current ? isMultiMovePuzzle(current) : false;
+  useEffect(() => {
+    if (!current || !attempt || !waitingForReply) return;
+    return schedulePuzzleReply(
+      current,
+      attempt,
+      (reply) => {
+        setAttempt(reply);
+        playMoveSound(reply.san);
+        setMessage(
+          reply.complete
+            ? "正确！请选择复习评级。"
+            : `正确，对手已走 ${reply.san}，请继续。`,
+        );
+      },
+      setMessage,
+    );
+  }, [current, attempt, waitingForReply]);
   let solutionFen = current?.fen;
   for (let i = 0; i < solutionStep; i++) {
     const u = current?.solutionLine[i];
@@ -40,7 +78,7 @@ export default function ReviewPage() {
       solutionFen;
   }
   function move(from: string, to: string, piece?: string) {
-    if (!current || revealed) return false;
+    if (!current || revealed || waitingForReply) return false;
     try {
       const played = playPuzzleMove(current, attempt, from, to, piece);
       if (!played) {
@@ -48,10 +86,12 @@ export default function ReviewPage() {
         return false;
       }
       if (!piece && played.san.includes("=")) {
+        setSelectedSquare(null);
         setPromotion({ from, to });
         return false;
       }
       setPromotion(null);
+      setSelectedSquare(null);
       setAttempt(played);
       playMoveSound(played.san);
       setMessage(
@@ -59,13 +99,25 @@ export default function ReviewPage() {
           ? "再想想。你可以查看正确答案并给本题评级。"
           : played.complete
             ? "正确！请选择复习评级。"
-            : `正确，对手已走 ${uciLineToSan(current.fen, played.moves).at(-1)}，请继续。`,
+            : "正确，等待对手走棋…",
       );
       return true;
     } catch (error) {
       setMessage(String(error));
       return false;
     }
+  }
+  function clickSquare(square: string) {
+    if (!current || !fen || revealed || promotion || waitingForReply) return;
+    const chess = new Chess(fen);
+    const piece = chess.get(square as Square);
+    if (piece?.color === chess.turn()) {
+      setSelectedSquare(
+        selected === square ? null : { puzzleId: current.id, fen, square },
+      );
+      return;
+    }
+    if (selected) move(selected, square);
   }
   function advanceSolution() {
     if (!current) return;
@@ -97,6 +149,7 @@ export default function ReviewPage() {
       });
       setQueue((q) => q.slice(1));
       setAttempt(null);
+      setSelectedSquare(null);
       setPromotion(null);
       setSolutionStep(0);
       setStarted(clockNow());
@@ -115,7 +168,7 @@ export default function ReviewPage() {
           <h1>今日训练</h1>
           <p>
             到期 {queue.length} 道 ·
-            在棋盘上完成正确走法，多步题会自动走出对手应手。
+            拖动棋子，或依次点击起点和终点走棋；多步题会自动走出对手应手。
           </p>
         </div>
       </div>
@@ -133,17 +186,24 @@ export default function ReviewPage() {
           <div className="board-frame w-full overflow-hidden rounded-lg border-8 border-[#223033] shadow-[0_16px_35px_#0004]">
             <Chessboard
               options={{
-                position:
-                  solutionStep > 0
-                    ? solutionFen
-                    : (attempt?.fen ?? current.fen),
+                position: solutionStep > 0 ? solutionFen : fen,
                 boardOrientation: current.sideToMove,
-                allowDragging: !revealed && !promotion,
+                allowDragging: !revealed && !promotion && !waitingForReply,
+                dragActivationDistance: 5,
                 canDragPiece: ({ piece }) =>
                   piece.pieceType[0] ===
                   (current.sideToMove === "white" ? "w" : "b"),
+                onPieceDrag: () => setSelectedSquare(null),
                 onPieceDrop: ({ sourceSquare, targetSquare }) =>
                   targetSquare ? move(sourceSquare, targetSquare) : false,
+                onSquareClick: ({ square }) => clickSquare(square),
+                squareStyles: selected
+                  ? {
+                      [selected]: {
+                        backgroundColor: "var(--color-board-selected)",
+                      },
+                    }
+                  : {},
                 darkSquareStyle: { backgroundColor: "var(--color-board-dark)" },
                 lightSquareStyle: {
                   backgroundColor: "var(--color-board-light)",

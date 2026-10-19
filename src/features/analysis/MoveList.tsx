@@ -1,13 +1,21 @@
 import { Fragment, useEffect, useRef } from "react";
 import { moveNumber, type ReviewMove, type ReviewTree } from "./review-tree";
 
+import { qualityBadges, type MoveQuality } from "./move-quality";
+
 type Props = {
   tree: ReviewTree;
+  qualities?: Record<string, MoveQuality>;
   onSelect: (id: string | null) => void;
   onMainline: () => void;
 };
 
-export default function MoveList({ tree, onSelect, onMainline }: Props) {
+export default function MoveList({
+  tree,
+  qualities = {},
+  onSelect,
+  onMainline,
+}: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -33,6 +41,12 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
     numbered = false,
   ) {
     if (!move) return <span />;
+    const quality = qualities[move.id];
+    const category =
+      quality?.fen === move.fenAfter && !quality.status
+        ? quality.candidate?.category
+        : null;
+    const badge = category ? qualityBadges[category] : null;
     return (
       <button
         ref={tree.currentId === move.id ? selectedRef : undefined}
@@ -49,6 +63,16 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
           </small>
         )}
         {move.san}
+        {badge && (
+          <span
+            className={`move-list-quality-badge ml-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-0.5 text-[10px] font-bold leading-none ${badge.color}`}
+            data-category={category}
+            title={`${category} · ${badge.label}`}
+            aria-label={badge.label}
+          >
+            {badge.symbol}
+          </span>
+        )}
       </button>
     );
   }
@@ -125,8 +149,8 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
   const first = children.get(null)?.[0];
   const hasBranches = tree.moves.some((move) => move.sourceMoveId === null);
   return (
-    <div className="panel moves-panel rounded-xl border border-panel-edge bg-panel">
-      <div className="section-title moves-heading border-b border-panel-edge px-3 py-2.5 text-[13px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d] flex items-center justify-between gap-2 [&_button]:px-[9px] [&_button]:py-[5px] [&_button]:text-[11px]">
+    <div className="panel moves-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel">
+      <div className="section-title moves-heading shrink-0 border-b border-panel-edge px-3 py-2.5 text-[13px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d] flex items-center justify-between gap-2 [&_button]:px-[9px] [&_button]:py-[5px] [&_button]:text-[11px]">
         <div>
           招法{" "}
           <span
@@ -145,7 +169,7 @@ export default function MoveList({ tree, onSelect, onMainline }: Props) {
         )}
       </div>
       <div
-        className="moves-list relative max-h-[clamp(140px,calc(100dvh-480px),240px)] overflow-auto overscroll-contain p-2"
+        className="moves-list relative min-h-0 flex-1 overflow-auto overscroll-contain p-2"
         ref={listRef}
       >
         <button

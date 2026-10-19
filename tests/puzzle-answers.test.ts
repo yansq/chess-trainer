@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Chess } from "chess.js";
 import {
   parsePuzzleAnswers,
   isMultiMovePuzzle,
 } from "../src/features/puzzles/answers";
-import { playPuzzleMove } from "../src/features/review/attempt";
+import {
+  isWaitingForReply,
+  playPuzzleMove,
+  playPuzzleReply,
+  schedulePuzzleReply,
+} from "../src/features/review/attempt";
 import type { Puzzle } from "../src/shared/types";
 
 const start = new Chess().fen();
@@ -67,28 +72,39 @@ describe("多步题目录入", () => {
 });
 
 describe("连续解题", () => {
-  it("正确首步后自动应手，最后一步之前不揭晓答案或允许评级", () => {
+  it("分开执行自己的落子和对手应手，等待时不能提前走下一步", () => {
     const p = puzzle();
     const first = playPuzzleMove(p, null, "e2", "e4")!;
-    expect(first.moves).toEqual(["e2e4", "e7e5"]);
+    expect(first.moves).toEqual(["e2e4"]);
     const board = new Chess();
     board.move("e4");
-    board.move("e5");
     expect(first.fen).toBe(board.fen());
+    expect(isWaitingForReply(first)).toBe(true);
     expect(first.complete).toBe(false);
-    const second = playPuzzleMove(p, first, "g1", "f3")!;
-    expect(second.moves).toEqual(["e2e4", "e7e5", "g1f3", "b8c6"]);
+    expect(playPuzzleMove(p, first, "g1", "f3")).toBeNull();
+    const reply = playPuzzleReply(p, first)!;
+    board.move("e5");
+    expect(reply.fen).toBe(board.fen());
+    expect(reply.moves).toEqual(["e2e4", "e7e5"]);
+    expect(isWaitingForReply(reply)).toBe(false);
+    expect(playPuzzleReply(p, reply)).toBeNull();
+    const second = playPuzzleMove(p, reply, "g1", "f3")!;
+    expect(second.moves).toEqual(["e2e4", "e7e5", "g1f3"]);
     expect(second.complete).toBe(false);
-    const last = playPuzzleMove(p, second, "f1", "b5")!;
+    const secondReply = playPuzzleReply(p, second)!;
+    expect(secondReply.moves).toEqual(["e2e4", "e7e5", "g1f3", "b8c6"]);
+    const last = playPuzzleMove(p, secondReply, "f1", "b5")!;
     expect(last).toMatchObject({ correct: true, complete: true });
     expect(playPuzzleMove(p, last, "a7", "a6")).toBeNull();
+    expect(playPuzzleReply(p, last)).toBeNull();
   });
   it("合法但错误的后续步立即结束并记为错误", () => {
     const p = puzzle();
-    const first = playPuzzleMove(p, null, "e2", "e4")!;
+    const first = playPuzzleReply(p, playPuzzleMove(p, null, "e2", "e4")!)!;
     const wrong = playPuzzleMove(p, first, "d2", "d4")!;
     expect(wrong).toMatchObject({ correct: false, complete: true });
     expect(wrong.moves).toEqual(["e2e4", "e7e5", "d2d4"]);
+    expect(playPuzzleReply(p, wrong)).toBeNull();
     expect(playPuzzleMove(p, first, "e2", "e4")).toBeNull();
     expect(first.moves).toEqual(["e2e4", "e7e5"]);
   });
@@ -97,13 +113,18 @@ describe("连续解题", () => {
     board.move("e4");
     const p = puzzle("e5 Nf3 Nc6", board.fen());
     const first = playPuzzleMove(p, null, "e7", "e5")!;
-    expect(first.moves).toEqual(["e7e5", "g1f3"]);
+    expect(first.moves).toEqual(["e7e5"]);
     expect(first.complete).toBe(false);
-    expect(playPuzzleMove(p, first, "b8", "c6")).toMatchObject({
+    const reply = playPuzzleReply(p, first)!;
+    expect(reply.moves).toEqual(["e7e5", "g1f3"]);
+    expect(playPuzzleMove(p, reply, "b8", "c6")).toMatchObject({
       correct: true,
       complete: true,
     });
-    expect(playPuzzleMove(puzzle("e4 e5"), null, "e2", "e4")).toMatchObject({
+    const endsWithReply = puzzle("e4 e5");
+    const beforeReply = playPuzzleMove(endsWithReply, null, "e2", "e4")!;
+    expect(beforeReply.complete).toBe(false);
+    expect(playPuzzleReply(endsWithReply, beforeReply)).toMatchObject({
       correct: true,
       complete: true,
     });
@@ -129,7 +150,9 @@ describe("连续解题", () => {
   });
   it("升变保留指定棋子，错误的损坏应手不会静默通过", () => {
     const p = puzzle("a8=N Kh7", "7k/P7/8/8/8/8/8/7K w - - 0 1");
-    expect(playPuzzleMove(p, null, "a7", "a8", "n")).toMatchObject({
+    const promoted = playPuzzleMove(p, null, "a7", "a8", "n")!;
+    expect(promoted).toMatchObject({ san: "a8=N", complete: false });
+    expect(playPuzzleReply(p, promoted)).toMatchObject({
       correct: true,
       complete: true,
     });
@@ -137,5 +160,48 @@ describe("连续解题", () => {
     expect(() => playPuzzleMove(broken, null, "e2", "e4")).toThrow(
       "对手应手不合法",
     );
+  });
+});
+
+describe("对手应手间隔", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("等待 400 毫秒再落子；以对手应手结束的题目此前不能评级", () => {
+    const p = puzzle("e4 e5");
+    const played = playPuzzleMove(p, null, "e2", "e4")!;
+    const onReply = vi.fn();
+    const onError = vi.fn();
+    schedulePuzzleReply(p, played, onReply, onError);
+    vi.advanceTimersByTime(399);
+    expect(onReply).not.toHaveBeenCalled();
+    expect(played).toMatchObject({ moves: ["e2e4"], complete: false });
+    vi.advanceTimersByTime(1);
+    expect(onReply).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        moves: ["e2e4", "e7e5"],
+        san: "e5",
+        complete: true,
+        correct: true,
+      }),
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("离开题目时取消等待，不再更新棋盘或播放对手落子", () => {
+    const p = puzzle();
+    const onReply = vi.fn();
+    const onError = vi.fn();
+    const cancel = schedulePuzzleReply(
+      p,
+      playPuzzleMove(p, null, "e2", "e4")!,
+      onReply,
+      onError,
+    );
+    vi.advanceTimersByTime(200);
+    cancel();
+    vi.runAllTimers();
+    expect(onReply).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 });

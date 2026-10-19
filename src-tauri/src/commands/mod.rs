@@ -54,6 +54,14 @@ pub fn save_puzzle(state: State<Database>, puzzle: Puzzle) -> Result<String, Str
     repository::save_puzzle(&*db(&state)?, puzzle)
 }
 #[tauri::command]
+pub fn get_puzzle(state: State<Database>, id: String) -> Result<Puzzle, String> {
+    repository::get_puzzle(&*db(&state)?, &id)
+}
+#[tauri::command]
+pub fn delete_puzzle(state: State<Database>, id: String) -> Result<(), String> {
+    repository::delete_puzzle(&*db(&state)?, &id)
+}
+#[tauri::command]
 pub fn list_puzzles(
     state: State<Database>,
     due: bool,

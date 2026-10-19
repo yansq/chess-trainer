@@ -37,6 +37,8 @@ export const api = {
     invoke<void>("set_reviewed", { id, reviewed }),
   nextPuzzleTitle: (gameId: string, category: PuzzleCategory = "opening") =>
     invoke<string>("next_puzzle_title", { gameId, category }),
+  getPuzzle: (id: string) => invoke<Puzzle>("get_puzzle", { id }),
+  deletePuzzle: (id: string) => invoke<void>("delete_puzzle", { id }),
   savePuzzle: (puzzle: Puzzle) => invoke<string>("save_puzzle", { puzzle }),
   listPuzzles: (due: boolean, category: PuzzleCategory | null = null) =>
     invoke<Puzzle[]>("list_puzzles", { due, category }),

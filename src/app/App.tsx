@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 const GamesPage = lazy(() => import("../features/games/GamesPage"));
 const AnalysisPage = lazy(() => import("../features/analysis/AnalysisPage"));
+const PuzzleEditPage = lazy(() => import("../features/puzzles/PuzzleEditPage"));
 const PuzzlesPage = lazy(() => import("../features/puzzles/PuzzlesPage"));
 const ReviewPage = lazy(() => import("../features/review/ReviewPage"));
 const StatisticsPage = lazy(
@@ -25,6 +26,7 @@ const nav = [
 ] as const;
 export default function App() {
   const reviewingGame = useMatch("/analysis/:id");
+  const editingPuzzle = useMatch("/puzzles/:id/edit");
   return (
     <div className="shell [--sidebar-width:220px] h-dvh grid grid-cols-[var(--sidebar-width)_minmax(0,1fr)] overflow-hidden max-[900px]:[--sidebar-width:64px]">
       <aside className="sidebar fixed inset-y-0 left-0 flex h-dvh w-[var(--sidebar-width)] flex-col overflow-y-auto overscroll-none border-r border-[#283739] bg-sidebar px-[14px] py-7">
@@ -50,7 +52,7 @@ export default function App() {
         </nav>
       </aside>
       <main
-        className={`main col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-[1600px] overflow-auto overscroll-contain ${reviewingGame ? "px-6 py-5 max-[1150px]:px-5" : "px-[42px] pt-[35px] pb-[50px] max-[1150px]:px-[25px] max-[1150px]:py-7"}`}
+        className={`main col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-[1600px] overflow-auto overscroll-contain ${reviewingGame || editingPuzzle ? "!overflow-hidden px-6 py-5 max-[1150px]:px-5" : "px-[42px] pt-[35px] pb-[50px] max-[1150px]:px-[25px] max-[1150px]:py-7"}`}
       >
         <Suspense
           fallback={
@@ -66,8 +68,15 @@ export default function App() {
               path="/analysis"
               element={<Navigate to="/games" replace />}
             />
-            <Route path="/analysis/:id" element={<AnalysisPage />} />
+            <Route
+              path="/analysis/:id"
+              element={<AnalysisPage key={reviewingGame?.params.id} />}
+            />
             <Route path="/puzzles" element={<PuzzlesPage />} />
+            <Route
+              path="/puzzles/:id/edit"
+              element={<PuzzleEditPage key={editingPuzzle?.params.id} />}
+            />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/statistics" element={<StatisticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

@@ -26,6 +26,8 @@ pub fn run() {
             commands::next_puzzle_title,
             commands::save_puzzle,
             commands::list_puzzles,
+            commands::get_puzzle,
+            commands::delete_puzzle,
             commands::get_schedule,
             commands::record_review,
             commands::get_setting,

@@ -410,6 +410,26 @@ fn puzzle_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Puzzle> {
     })
 }
 const PUZZLE_SELECT:&str="SELECT id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category,category FROM puzzles";
+pub fn get_puzzle(db: &Connection, id: &str) -> Result<Puzzle, String> {
+    db.query_row(
+        &format!("{PUZZLE_SELECT} WHERE id=?1"),
+        [id],
+        puzzle_from_row,
+    )
+    .optional()
+    .map_err(err)?
+    .ok_or_else(|| "题目不存在或已被删除".into())
+}
+pub fn delete_puzzle(db: &Connection, id: &str) -> Result<(), String> {
+    // Foreign keys cascade to this puzzle's schedule and review logs only.
+    let count = db
+        .execute("DELETE FROM puzzles WHERE id=?1", [id])
+        .map_err(err)?;
+    if count == 0 {
+        return Err("题目不存在或已被删除".into());
+    }
+    Ok(())
+}
 pub fn puzzles(db: &Connection, due: bool, category: Option<&str>) -> Result<Vec<Puzzle>, String> {
     if let Some(category) = category {
         puzzle_category_label(category)?;
@@ -681,6 +701,50 @@ mod tests {
             solution_line: vec!["e2e4".into(), "e7e5".into(), "g1f3".into()],
             error_category: None,
         }
+    }
+
+    #[test]
+    fn delete_puzzle_cascades_its_training_data_and_preserves_other_data() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        import_games(&mut db, vec![sample_game()]).unwrap();
+        save_puzzle(
+            &db,
+            named_puzzle("delete-me", Some("lichess:abcdefgh"), "删除题"),
+        )
+        .unwrap();
+        save_puzzle(
+            &db,
+            named_puzzle("keep", Some("lichess:abcdefgh"), "保留题"),
+        )
+        .unwrap();
+        for id in ["delete-me", "keep"] {
+            db.execute("INSERT INTO review_logs(puzzle_id,reviewed_at,played_move,is_correct,rating,time_spent_ms) VALUES (?1,CURRENT_TIMESTAMP,'e2e4',1,'Good',100)", [id]).unwrap();
+        }
+        assert_eq!(get_puzzle(&db, "delete-me").unwrap().title, "删除题");
+        delete_puzzle(&db, "delete-me").unwrap();
+        assert!(get_puzzle(&db, "delete-me").is_err());
+        assert!(delete_puzzle(&db, "delete-me").is_err());
+        assert!(schedule(&db, "delete-me").is_err());
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM review_logs WHERE puzzle_id='delete-me'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(get_puzzle(&db, "keep").unwrap().title, "保留题");
+        assert!(schedule(&db, "keep").is_ok());
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM review_logs WHERE puzzle_id='keep'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(get_game(&db, "lichess:abcdefgh").is_ok());
     }
 
     #[test]
