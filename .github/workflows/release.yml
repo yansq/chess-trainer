@@ -54,7 +54,7 @@ jobs:
           umask 077
           key_path="$RUNNER_TEMP/chess-trainer.key"
           trap 'rm -f "$key_path" "$key_path.pub"' EXIT
-          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key_path"
+          printf '%s' "$UPDATE_SIGNING_KEY" > "$key_path"
           node --input-type=module -e 'import fs from "node:fs"; const c=JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json","utf8")); fs.writeFileSync(process.argv[1], c.plugins.updater.pubkey+"\n");' "$key_path.pub"
           TAURI_SIGNING_PRIVATE_KEY="$key_path" pnpm release:prepare
       - name: Publish verified release
