@@ -98,15 +98,44 @@ describe("连续解题", () => {
     expect(playPuzzleMove(p, last, "a7", "a6")).toBeNull();
     expect(playPuzzleReply(p, last)).toBeNull();
   });
-  it("合法但错误的后续步立即结束并记为错误", () => {
+  it("错误后续步保留局面和进度，可以反复重试直至答对", () => {
     const p = puzzle();
     const first = playPuzzleReply(p, playPuzzleMove(p, null, "e2", "e4")!)!;
     const wrong = playPuzzleMove(p, first, "d2", "d4")!;
-    expect(wrong).toMatchObject({ correct: false, complete: true });
-    expect(wrong.moves).toEqual(["e2e4", "e7e5", "d2d4"]);
+    expect(wrong).toMatchObject({ correct: false, complete: false });
+    expect(wrong.fen).toBe(first.fen);
+    expect(wrong.moves).toEqual(["e2e4", "e7e5"]);
+    expect(isWaitingForReply(wrong)).toBe(false);
+    const again = playPuzzleMove(p, wrong, "b1", "c3")!;
+    expect(again.fen).toBe(first.fen);
+    expect(again.moves).toEqual(first.moves);
+    const right = playPuzzleMove(p, again, "g1", "f3")!;
+    expect(right.correct).toBe(true);
+    const reply = playPuzzleReply(p, right)!;
+    expect(playPuzzleMove(p, reply, "f1", "b5")).toMatchObject({
+      correct: true,
+      complete: true,
+    });
     expect(playPuzzleReply(p, wrong)).toBeNull();
     expect(playPuzzleMove(p, first, "e2", "e4")).toBeNull();
     expect(first.moves).toEqual(["e2e4", "e7e5"]);
+  });
+  it("单步题和多步题首步答错可重试，非法走法也不推进", () => {
+    for (const p of [
+      puzzle(),
+      { ...puzzle(), ...parsePuzzleAnswers(start, "e4,d4", false) },
+    ]) {
+      const wrong = playPuzzleMove(p, null, "g1", "f3")!;
+      expect(wrong).toMatchObject({
+        fen: start,
+        moves: [],
+        correct: false,
+        complete: false,
+      });
+      expect(isWaitingForReply(wrong)).toBe(false);
+      expect(playPuzzleMove(p, wrong, "e2", "e5")).toBeNull();
+      expect(playPuzzleMove(p, wrong, "e2", "e4")?.correct).toBe(true);
+    }
   });
   it("黑方题从来源局面开始；答案可在对手应手后结束", () => {
     const board = new Chess();

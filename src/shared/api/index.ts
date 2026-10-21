@@ -42,6 +42,8 @@ export const api = {
   savePuzzle: (puzzle: Puzzle) => invoke<string>("save_puzzle", { puzzle }),
   listPuzzles: (due: boolean, category: PuzzleCategory | null = null) =>
     invoke<Puzzle[]>("list_puzzles", { due, category }),
+  getDueForecast: (boundaries: string[]) =>
+    invoke<number[]>("get_due_forecast", { boundaries }),
   getSchedule: (id: string) => invoke<Schedule>("get_schedule", { id }),
   recordReview: (input: ReviewInput) =>
     invoke<void>("record_review", { input }),

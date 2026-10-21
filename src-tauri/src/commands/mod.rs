@@ -70,6 +70,13 @@ pub fn list_puzzles(
     repository::puzzles(&*db(&state)?, due, category.as_deref())
 }
 #[tauri::command]
+pub fn get_due_forecast(
+    state: State<Database>,
+    boundaries: Vec<String>,
+) -> Result<Vec<i64>, String> {
+    repository::due_forecast(&*db(&state)?, &boundaries)
+}
+#[tauri::command]
 pub fn get_schedule(state: State<Database>, id: String) -> Result<Schedule, String> {
     repository::schedule(&*db(&state)?, &id)
 }

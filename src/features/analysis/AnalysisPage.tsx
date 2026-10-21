@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
@@ -33,6 +33,8 @@ import {
   type MoveQuality,
 } from "./move-quality";
 import MoveList from "./MoveList";
+import { startGameAnalysis, type GameAnalysis } from "./game-analysis";
+import { puzzleContinuation } from "./puzzle-continuation";
 import { parsePuzzleAnswers } from "../puzzles/answers";
 import {
   createReviewTree,
@@ -86,12 +88,39 @@ export default function AnalysisPage() {
   const titleRequest = useRef(0);
   const [description, setDescription] = useState("");
   const [answers, setAnswers] = useState("");
+  const [puzzleOrigin, setPuzzleOrigin] = useState<{
+    moveId: string | null;
+    sourceMoveId: string | null;
+    fen: string;
+  } | null>(null);
+  const syncPuzzleAnswers = useCallback(
+    (next: ReviewTree) => {
+      if (activeTool !== "puzzle" || !puzzleOrigin) return;
+      const text = puzzleContinuation(next, puzzleOrigin.moveId);
+      if (text !== null) setAnswers(text);
+    },
+    [activeTool, puzzleOrigin],
+  );
   const [positionAnalysis, setPositionAnalysis] =
     useState<PositionAnalysis | null>(null);
   const [moveQualities, setMoveQualities] = useState<{
     gameId: string;
     values: Record<string, MoveQuality>;
   }>({ gameId: "", values: {} });
+  const [gameAnalysis, setGameAnalysis] = useState<
+    (GameAnalysis & { gameId: string }) | null
+  >(null);
+  const [analysisRetry, setAnalysisRetry] = useState(0);
+  const gameId = game?.id;
+  const gameMoves = game?.moves;
+  useEffect(() => {
+    if (!gameId || !gameMoves) return;
+    return startGameAnalysis(
+      gameMoves,
+      gameMoves[0]?.fenBefore ?? new Chess().fen(),
+      (result) => setGameAnalysis({ ...result, gameId }),
+    );
+  }, [gameId, gameMoves, analysisRetry]);
   const batchCancelled = useRef(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [batchProgress, setBatchProgress] = useState("");
@@ -136,33 +165,44 @@ export default function AnalysisPage() {
           e.key === "ArrowLeft" ? "back" : "next",
         );
         playReviewSound(review, next);
+        syncPuzzleAnswers(next);
         setReview(next);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [review]);
+  }, [review, syncPuzzleAnswers]);
   const currentMove = currentReviewMove(review);
   const ply = currentMove?.ply ?? 0;
   const fen = currentMove?.fenAfter ?? review.initialFen;
-  const engine =
-    positionAnalysis?.fen === fen ? positionAnalysis.analysis : null;
-  const engineStatus =
-    positionAnalysis?.fen === fen ? positionAnalysis.status : "分析中…";
   const inBranch = !!currentMove && currentMove.sourceMoveId === null;
+  const preanalysis = gameAnalysis?.gameId === game?.id ? gameAnalysis : null;
+  const engine = inBranch
+    ? positionAnalysis?.fen === fen
+      ? positionAnalysis.analysis
+      : null
+    : (preanalysis?.positions[fen] ?? null);
+  const engineStatus = inBranch
+    ? positionAnalysis?.fen === fen
+      ? positionAnalysis.status
+      : "分析中…"
+    : engine
+      ? ""
+      : (preanalysis?.status ?? "准备整局预分析…");
   const lineLength = reviewLineEnd(review)?.ply ?? 0;
   const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
-  const qualities =
-    moveQualities.gameId === game?.id ? moveQualities.values : {};
+  const qualities = {
+    ...preanalysis?.qualities,
+    ...(moveQualities.gameId === game?.id ? moveQualities.values : {}),
+  };
   const moveQuality = currentMove ? qualities[currentMove.id] : null;
   const quality = moveQuality?.fen === fen ? moveQuality : null;
-  const badge = quality?.candidate
-    ? qualityBadges[quality.candidate.category]
-    : null;
+  const badge = quality?.category ? qualityBadges[quality.category] : null;
   const markedSquare = badge ? currentMove?.uci.slice(2, 4) : null;
   function changeReview(next: ReviewTree) {
     playReviewSound(review, next);
+    syncPuzzleAnswers(next);
     setSelectedSquare(null);
     setPromotion(null);
     setReview(next);
@@ -170,9 +210,11 @@ export default function AnalysisPage() {
   function navigate(direction: "start" | "back" | "next" | "end") {
     changeReview(navigateReview(review, direction));
   }
-  useEffect(() => startPositionAnalysis(fen, setPositionAnalysis), [fen]);
   useEffect(() => {
-    if (!game || !currentMove || !engine || engineStatus) return;
+    if (inBranch) return startPositionAnalysis(fen, setPositionAnalysis);
+  }, [fen, inBranch]);
+  useEffect(() => {
+    if (!game || !inBranch || !currentMove || !engine || engineStatus) return;
     return startMoveQualityAnalysis(
       { ...currentMove, gameId: game.id },
       engine,
@@ -185,7 +227,7 @@ export default function AnalysisPage() {
           },
         })),
     );
-  }, [game, currentMove, engine, engineStatus]);
+  }, [game, inBranch, currentMove, engine, engineStatus]);
   function playMove(from: string, to: string, piece?: string): boolean {
     const next = playReviewMove(review, from, to, piece);
     if (!next) return false;
@@ -334,6 +376,16 @@ export default function AnalysisPage() {
       setActiveTool("puzzle");
       return;
     }
+    setPuzzleOrigin({
+      moveId: review.currentId,
+      sourceMoveId: currentMove?.sourceMoveId ?? null,
+      fen,
+    });
+    setAnswers("");
+    setTitle("");
+    setGeneratedTitle("");
+    setShowPuzzle(true);
+    setActiveTool("puzzle");
     await changePuzzleCategory(puzzleCategory);
   }
   async function changePuzzleCategory(category: PuzzleCategory) {
@@ -352,10 +404,10 @@ export default function AnalysisPage() {
     }
   }
   async function createPuzzle() {
-    if (!game) return;
+    if (!game || !puzzleOrigin) return;
     let parsed: ReturnType<typeof parsePuzzleAnswers>;
     try {
-      parsed = parsePuzzleAnswers(fen, answers, true);
+      parsed = parsePuzzleAnswers(puzzleOrigin.fen, answers, true);
     } catch (error) {
       setMessage(String(error));
       return;
@@ -365,9 +417,9 @@ export default function AnalysisPage() {
       sourceType: "manual",
       category: puzzleCategory,
       sourceGameId: game.id,
-      sourceMoveId: currentMove?.sourceMoveId ?? null,
-      fen,
-      sideToMove: fen.split(" ")[1] === "w" ? "white" : "black",
+      sourceMoveId: puzzleOrigin.sourceMoveId,
+      fen: puzzleOrigin.fen,
+      sideToMove: puzzleOrigin.fen.split(" ")[1] === "w" ? "white" : "black",
       title: title.trim() === generatedTitle ? "" : title.trim(),
       description,
       originalMove: null,
@@ -386,25 +438,25 @@ export default function AnalysisPage() {
   }
   if (!id)
     return (
-      <div className="empty full px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">
+      <div className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
         请从「对局」列表选择一局开始复盘。
       </div>
     );
   if (!game)
     return (
-      <div className="empty full px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">
+      <div className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
         {message || "加载对局…"}
       </div>
     );
   return (
-    <div className="analysis-workspace flex h-full min-h-0 flex-col">
-      <div className="page-head compact mb-3 shrink-0 flex items-center justify-between gap-3 [&_h1]:truncate [&_p]:truncate [&_h1]:my-1 [&_h1]:text-[24px] [&>button]:shrink-0 [&>button]:px-3 [&>button]:py-2 [&>button]:text-[12px] [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mb-3 shrink-0 flex items-center justify-between gap-3 [&_h1]:truncate [&_p]:truncate [&_h1]:my-1 [&_h1]:text-2xl [&>button]:shrink-0 [&>button]:px-3 [&>button]:py-2 [&>button]:text-xs [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
         <div className="min-w-0">
-          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             GAME REVIEW
           </div>
           <h1>
-            {game.whitePlayer} <span className="muted text-muted">vs</span>{" "}
+            {game.whitePlayer} <span className="text-muted">vs</span>{" "}
             {game.blackPlayer}
           </h1>
           <p>
@@ -414,7 +466,7 @@ export default function AnalysisPage() {
           </p>
         </div>
         <button
-          className="secondary border-control-edge bg-secondary text-secondary-ink"
+          className="border-control-edge bg-secondary text-secondary-ink"
           disabled={reviewBusy}
           onClick={() => void completeOrNextGame()}
         >
@@ -423,16 +475,16 @@ export default function AnalysisPage() {
       </div>
       <div className="mb-2 h-7 shrink-0" role="status" aria-live="polite">
         {message && (
-          <div className="notice h-full overflow-auto rounded-md border border-[#456457] bg-[#22392e] px-3 py-1 text-[12px] text-[#cce9d4]">
+          <div className="h-full overflow-auto rounded-md border border-notice-edge bg-notice px-3 py-1 text-xs text-notice-ink">
             {message}
           </div>
         )}
       </div>
-      <div className="analysis-layout grid min-h-0 flex-1 grid-cols-[minmax(0,1.15fr)_minmax(300px,1fr)] gap-4">
-        <section className="board-col grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_minmax(128px,20%)] gap-3">
-          <div className="board-stage relative min-h-0 min-w-0 [container-type:size]">
-            <div className="board-stack mx-auto w-[min(100cqw,calc(100cqh-76px))]">
-              <div className="board-frame w-full overflow-hidden rounded-lg border-8 border-[#223033] shadow-[0_16px_35px_#0004]">
+      <div className="grid min-h-0 flex-1 grid-cols-analysis gap-4">
+        <section className="grid min-h-0 min-w-0 grid-rows-analysis gap-3">
+          <div className="relative min-h-0 min-w-0 container-size">
+            <div className="mx-auto w-analysis-board">
+              <div className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
                 <Chessboard
                   options={{
                     position: fen,
@@ -456,25 +508,20 @@ export default function AnalysisPage() {
                       : {},
                     squareRenderer: ({ square, children }) => (
                       <div
-                        className="relative h-full w-full"
-                        style={
-                          selected === square
-                            ? { backgroundColor: "var(--color-board-selected)" }
-                            : undefined
-                        }
+                        className={`relative h-full w-full ${selected === square ? "bg-board-selected" : ""}`}
                         title={
                           square === markedSquare && badge
-                            ? `${badge.label} · ${quality?.candidate?.category}`
+                            ? `${badge.label} · ${quality?.category}`
                             : undefined
                         }
                       >
                         {children}
                         {square === markedSquare && badge && (
                           <span
-                            className={`move-quality-badge pointer-events-none absolute right-0.5 top-0.5 z-10 flex size-[clamp(18px,2vw,26px)] items-center justify-center rounded-full text-[clamp(11px,1.2vw,15px)] font-extrabold leading-none shadow-md ring-1 ring-black/20 ${badge.color}`}
+                            className={` pointer-events-none absolute right-0.5 top-0.5 z-10 flex size-move-badge items-center justify-center rounded-full text-move-badge font-extrabold leading-none shadow-md ring-1 ring-black/20 ${badge.color}`}
                             aria-label={`${badge.label}：${currentMove?.san}`}
                             data-square={square}
-                            data-category={quality?.candidate?.category}
+                            data-category={quality?.category}
                           >
                             {badge.symbol}
                           </span>
@@ -493,7 +540,7 @@ export default function AnalysisPage() {
               </div>
               {promotion?.fen === fen && (
                 <div
-                  className="promotion-picker absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-2 bg-panel p-3"
+                  className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-2 bg-panel p-3"
                   role="group"
                   aria-label="选择升变棋子"
                 >
@@ -516,23 +563,23 @@ export default function AnalysisPage() {
                     </button>
                   ))}
                   <button
-                    className="secondary border-control-edge bg-secondary text-secondary-ink"
+                    className="border-control-edge bg-secondary text-secondary-ink"
                     onClick={() => setPromotion(null)}
                   >
                     取消
                   </button>
                 </div>
               )}
-              <div className="board-controls flex items-center justify-center gap-1 rounded-b-[9px] border border-panel-edge bg-panel px-2 py-1.5 [&_span]:min-w-[48px] [&_span]:text-center [&_span]:text-[13px] [&_span]:text-[#8da39a]">
+              <div className="flex items-center justify-center gap-1 rounded-b-nav border border-panel-edge bg-panel px-2 py-1.5 [&_span]:min-w-12 [&_span]:text-center [&_span]:text-body-sm [&_span]:text-coordinate">
                 <button
-                  className="icon-button border-none border-current bg-transparent p-1 text-[#b7c9c1] [&_svg]:size-4"
+                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
                   onClick={() => navigate("start")}
                   aria-label="回到开局"
                 >
                   <ChevronsLeft />
                 </button>
                 <button
-                  className="icon-button border-none border-current bg-transparent p-1 text-[#b7c9c1] [&_svg]:size-4"
+                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
                   onClick={() => navigate("back")}
                   aria-label="上一步"
                 >
@@ -543,39 +590,39 @@ export default function AnalysisPage() {
                   {ply} / {lineLength}
                 </span>
                 <button
-                  className="icon-button border-none border-current bg-transparent p-1 text-[#b7c9c1] [&_svg]:size-4"
+                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
                   onClick={() => navigate("next")}
                   aria-label="下一步"
                 >
                   <ChevronRight />
                 </button>
                 <button
-                  className="icon-button border-none border-current bg-transparent p-1 text-[#b7c9c1] [&_svg]:size-4"
+                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
                   onClick={() => navigate("end")}
                   aria-label="跳到终局"
                 >
                   <ChevronsRight />
                 </button>
                 <button
-                  className="icon-button border-none border-current bg-transparent p-1 text-[#b7c9c1] [&_svg]:size-4"
+                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
                   onClick={() => setFlipped((v) => !v)}
                   aria-label="翻转棋盘"
                 >
                   <RotateCcw />
                 </button>
               </div>
-              <div className="fen-row mt-2 flex items-center justify-end gap-2">
+              <div className="mt-2 flex items-center justify-end gap-2">
                 {quality?.status && (
                   <span
                     role="status"
-                    className="min-w-0 truncate text-[11px] text-muted"
+                    className="min-w-0 truncate text-caption text-muted"
                     title={quality.status}
                   >
                     {quality.status}
                   </span>
                 )}
                 <button
-                  className="secondary fen-copy border-control-edge bg-secondary text-secondary-ink min-w-[90px] shrink-0 px-2 py-1.5 text-[11px]"
+                  className="border-control-edge bg-secondary text-secondary-ink min-w-22.5 shrink-0 px-2 py-1.5 text-caption"
                   onClick={() => void copyFen()}
                   aria-label="复制当前局面 FEN"
                 >
@@ -609,7 +656,7 @@ export default function AnalysisPage() {
             />
           </div>
         </section>
-        <section className="review-col flex min-h-0 min-w-0 flex-col gap-3">
+        <section className="flex min-h-0 min-w-0 flex-col gap-3">
           <div
             className="grid shrink-0 grid-cols-3 gap-1 rounded-xl border border-panel-edge bg-panel p-1"
             aria-label="复盘工具"
@@ -624,7 +671,7 @@ export default function AnalysisPage() {
               <button
                 key={tool}
                 aria-pressed={activeTool === tool}
-                className={`border-0 px-2 py-2 text-[12px] ${activeTool === tool ? "bg-selected text-selected-ink" : "bg-transparent text-muted"}`}
+                className={`border-0 px-2 py-2 text-xs ${activeTool === tool ? "bg-selected text-selected-ink" : "bg-transparent text-muted"}`}
                 onClick={() =>
                   tool === "puzzle"
                     ? void openPuzzleForm()
@@ -642,17 +689,17 @@ export default function AnalysisPage() {
                 : "hidden"
             }
           >
-            <div className="panel engine-panel shrink-0 overflow-hidden rounded-xl border border-panel-edge bg-panel">
-              <div className="section-title border-b border-panel-edge px-3 py-2.5 text-[13px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+            <div className="shrink-0 overflow-hidden rounded-xl border border-panel-edge bg-panel">
+              <div className="section-title border-b border-panel-edge px-3 py-2.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
                 Stockfish 分析{" "}
                 <span>
                   {engineStatus && engine ? ` · ${engineStatus}` : ""}
                 </span>
               </div>
-              <div className="engine-content h-[188px] overflow-auto overscroll-contain p-1.5 text-[13px]">
+              <div className="h-47 overflow-auto overscroll-contain p-1.5 text-body-sm">
                 {engine && engine.fen === fen ? (
                   <ol
-                    className="engine-variations m-0 w-full list-none p-0 divide-y divide-control-edge"
+                    className="m-0 w-full list-none p-0 divide-y divide-control-edge"
                     aria-label="推荐招法"
                   >
                     {engine.variations.slice(0, 3).map((variation) => {
@@ -662,7 +709,7 @@ export default function AnalysisPage() {
                         <li key={variation.rank}>
                           <button
                             type="button"
-                            className="engine-candidate block w-full rounded-md border border-transparent bg-transparent px-2 py-2 text-left whitespace-normal text-inherit [font:inherit] enabled:hover:border-[#3b5a4c] enabled:hover:bg-[#22352d] enabled:hover:filter-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent-ink focus-visible:outline-offset-2"
+                            className="block w-full rounded-md border border-transparent bg-transparent px-2 py-2 text-left whitespace-normal text-inherit font-inherit enabled:hover:border-candidate-edge enabled:hover:bg-candidate-hover enabled:hover:filter-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent-ink focus-visible:outline-offset-2"
                             aria-label={`走推荐 ${variation.rank}：${sanLine[0] ?? "无可用招法"}`}
                             title={
                               sanLine[0]
@@ -674,21 +721,21 @@ export default function AnalysisPage() {
                               playMove(uci.slice(0, 2), uci.slice(2, 4), uci[4])
                             }
                           >
-                            <div className="engine-variation-head mb-1 flex items-center gap-3">
+                            <div className="mb-1 flex items-center gap-3">
                               <div>
                                 {variation.rank} · {sanLine[0] ?? "—"}
                               </div>
-                              <strong className="ml-auto tabular-nums text-accent-ink">
+                              <strong className="tabular-nums text-accent-ink">
                                 {variation.scoreType === "mate"
                                   ? `M${variation.scoreValue}`
                                   : (variation.scoreValue / 100).toFixed(2)}
                               </strong>
-                              <span className="text-[11px] text-engine-muted">
+                              <span className="ml-auto text-caption text-engine-muted">
                                 深度 {variation.depth}
                               </span>
                             </div>
                             <small
-                              className="block truncate font-chess-mono text-[11px] font-normal text-engine-muted"
+                              className="block truncate font-chess-mono text-caption font-normal text-engine-muted"
                               title={sanLine.join(" ")}
                             >
                               {sanLine.join(" ")}
@@ -699,7 +746,7 @@ export default function AnalysisPage() {
                     })}
                   </ol>
                 ) : (
-                  <span className="muted block px-2 py-3 text-muted">
+                  <span className="block px-2 py-3 text-muted">
                     {engineStatus || "请在设置中配置 Stockfish 路径"}
                   </span>
                 )}
@@ -708,6 +755,12 @@ export default function AnalysisPage() {
             <MoveList
               tree={review}
               qualities={qualities}
+              analysisStatus={preanalysis?.status}
+              onRetry={
+                preanalysis?.failed
+                  ? () => setAnalysisRetry((value) => value + 1)
+                  : undefined
+              }
               onSelect={(moveId) =>
                 changeReview(selectReviewMove(review, moveId))
               }
@@ -717,28 +770,28 @@ export default function AnalysisPage() {
           <div
             className={
               activeTool === "batch"
-                ? "panel batch-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel"
+                ? "  flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel"
                 : "hidden"
             }
           >
-            <div className="shrink-0 border-b border-panel-edge px-3 py-2.5 text-[13px] font-bold">
+            <div className="shrink-0 border-b border-panel-edge px-3 py-2.5 text-body-sm font-bold">
               整局失误分析
               {candidates.length > 0 && ` · ${candidates.length} 个候选`}
               {batchProgress && (
-                <span className="ml-2 text-[12px] font-normal text-engine-muted">
+                <span className="ml-2 text-xs font-normal text-engine-muted">
                   {batchProgress}
                 </span>
               )}
             </div>
-            <div className="batch-body shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-[#9cac9f] [&_button]:px-[9px] [&_button]:py-1.5 [&_button]:text-[12px]">
+            <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-candidate-ink [&_button]:px-2.25 [&_button]:py-1.5 [&_button]:text-xs">
               <button
-                className="secondary border-control-edge bg-secondary text-secondary-ink"
+                className="border-control-edge bg-secondary text-secondary-ink"
                 onClick={() => void detectBlunders()}
               >
                 分析整局失误
               </button>
               <button
-                className="secondary border-control-edge bg-secondary text-secondary-ink"
+                className="border-control-edge bg-secondary text-secondary-ink"
                 onClick={() => {
                   batchCancelled.current = true;
                   void api.engineStop();
@@ -750,13 +803,13 @@ export default function AnalysisPage() {
             </div>
             <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
               {!candidates.length && (
-                <p className="px-4 text-[13px] text-muted">
+                <p className="px-4 text-body-sm text-muted">
                   分析己方招法，确认失误后可直接加入题库。
                 </p>
               )}
               {candidates.map((c) => (
                 <div
-                  className="candidate flex flex-wrap items-center justify-between gap-2 border-t border-panel-edge px-4 py-3 text-[12px] text-[#9cac9f] [&_button]:px-[9px] [&_button]:py-1.5 [&_button]:text-[12px]"
+                  className="candidate flex flex-wrap items-center justify-between gap-2 border-t border-panel-edge px-4 py-3 text-xs text-candidate-ink [&_button]:px-2.25 [&_button]:py-1.5 [&_button]:text-xs"
                   key={c.move.id}
                 >
                   <span>
@@ -773,20 +826,20 @@ export default function AnalysisPage() {
           </div>
           {showPuzzle && (
             <div
-              className={`${activeTool === "puzzle" ? "flex" : "hidden"} min-h-0 flex-1 flex-col panel puzzle-form overflow-hidden rounded-xl border border-panel-edge bg-panel [&_textarea]:mx-3 [&_textarea]:my-1.5 [&_textarea]:w-[calc(100%_-_24px)] [&_textarea]:resize-none [&_input]:mx-3 [&_input]:my-1.5 [&_input]:w-[calc(100%_-_24px)] [&_input]:py-2 [&_input]:text-[13px] [&_textarea]:py-2 [&_textarea]:text-[13px] [&_p]:mx-3 [&_p]:my-2 [&_p]:text-[12px] [&_p]:text-[#94a7a0]`}
+              className={`${activeTool === "puzzle" ? "flex" : "hidden"} min-h-0 flex-1 flex-col   overflow-hidden rounded-xl border border-panel-edge bg-panel [&_textarea]:mx-3 [&_textarea]:my-1.5 [&_textarea]:w-editor-field [&_textarea]:resize-none [&_input]:mx-3 [&_input]:my-1.5 [&_input]:w-editor-field [&_input]:py-2 [&_input]:text-body-sm [&_textarea]:py-2 [&_textarea]:text-body-sm [&_p]:mx-3 [&_p]:my-2 [&_p]:text-xs [&_p]:text-help`}
             >
-              <div className="section-title shrink-0 border-b border-panel-edge px-3 py-2.5 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+              <div className="section-title shrink-0 border-b border-panel-edge px-3 py-2.5 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
                 创建训练题目
               </div>
               <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
                 <p>
-                  当前局面由{fen.split(" ")[1] === "w" ? "白方" : "黑方"}
-                  走棋。 按顺序填写双方走法，用空格分隔，如 e4 e5
-                  Nf3；也可只填一步。
+                  出题起点由
+                  {puzzleOrigin?.fen.split(" ")[1] === "w" ? "白方" : "黑方"}
+                  走棋。在棋盘上走棋会自动填入后续招法，退回或改走时同步更新；也可手动填写。
                 </p>
                 <div className="mx-3 mb-2 grid gap-2">
                   <div className="grid gap-1">
-                    <span className="text-[13px] text-engine-muted">
+                    <span className="text-body-sm text-engine-muted">
                       题目分类
                     </span>
                     <Select<PuzzleCategory>
@@ -814,12 +867,13 @@ export default function AnalysisPage() {
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
+                  aria-label="后续招法"
                   value={answers}
                   onChange={(e) => setAnswers(e.target.value)}
                   placeholder="连续走法，如 e4 e5 Nf3 或 e2e4 e7e5 g1f3"
                 />
               </div>
-              <div className="row-end flex shrink-0 justify-end gap-[9px] border-t border-panel-edge px-4 py-3">
+              <div className="flex shrink-0 justify-end gap-2.25 border-t border-panel-edge px-4 py-3">
                 <button onClick={() => void createPuzzle()}>保存题目</button>
               </div>
             </div>

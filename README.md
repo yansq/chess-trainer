@@ -34,6 +34,12 @@ pnpm tauri build --bundles app
 
 统一使用 Tailwind CSS 4，由 `@tailwindcss/vite` 编译。共用颜色和字体定义在 `src/style.css` 的 `@theme` 中，基础表单和表格使用 `@layer base` / `@apply`；页面和组件使用 Tailwind 工具类，包括响应式、Radix 状态和 Markdown 后代样式。动态音量只传入 CSS 变量；棋盘和图表通过组件的样式接口引用同一套主题颜色。
 
+### UI lint 配置
+
+`@shadcn/lint` 已注册到 `eslint.config.js`，运行 `pnpm lint` 即可加载。沿用现有 TypeScript/TSX parser，启用任意值、内联样式、原始颜色、组件重设样式检查，并对未知工具类发出警告。
+
+规则在该配置的 `rules` 中维护；参阅[可用规则](https://github.com/shadcn-ui/lint#rules)与[配置示例](https://github.com/shadcn-ui/lint#settings)。`settings.shadcn.ui` 指向 `@/shared/ui`（`src/shared/ui`）；主题由插件自动发现 `src/style.css`，无需创建 `components.json`。
+
 ## 数据和隐私
 
 Lichess 用户名、各账号的同步进度、引擎路径存入 SQLite；可选 PAT 由 macOS Keychain 保存。同步复用网络连接，每批请求超时为 30 秒，临时网络失败或服务端错误最多尝试 3 次；收到 429 会显示限流信息并保留进度，不连续重试。首次历史同步不设总局数上限；增量同步会分批补齐整个时间范围，完整成功后才推进同步时间。增量保留 24 小时重叠窗口，通过对局 ID 去重并保留笔记和复盘状态。旧版全局游标不作为历史完整的依据，升级后的第一次同步会补齐历史。未同步时所有已保存数据仍可使用。

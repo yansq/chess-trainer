@@ -63,15 +63,15 @@ export default function GamesPage() {
     setFilter((f) => ({ ...f, ...patch, offset: 0 }));
   return (
     <>
-      <div className="page-head mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
+      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
         <div>
-          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             YOUR GAMES
           </div>
           <h1>对局</h1>
         </div>
-        <div className="head-actions flex gap-2.5">
-          <label className="button secondary inline-flex items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-[14px] py-[9px] font-[650] whitespace-nowrap text-accent-dark cursor-pointer hover:brightness-[1.12] border-control-edge bg-secondary text-secondary-ink">
+        <div className="flex gap-2.5">
+          <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-3.5 py-2.25 font-control whitespace-nowrap text-accent-dark cursor-pointer hover:brightness-112 border-control-edge bg-secondary text-secondary-ink">
             <Upload size={16} /> 导入 PGN
             <input
               hidden
@@ -87,7 +87,7 @@ export default function GamesPage() {
           </label>
           <button
             type="button"
-            className="sync-button w-36 shrink-0"
+            className="w-36 shrink-0"
             disabled={busy || sync.pausing}
             onClick={() => {
               if (sync.running) sync.pause();
@@ -106,19 +106,19 @@ export default function GamesPage() {
         </div>
       </div>
       {message && (
-        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
           {message}
         </div>
       )}
       {sync.message && (
         <div
-          className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]"
+          className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink"
           role="status"
         >
           {sync.message}
         </div>
       )}
-      <div className="panel filters rounded-xl border border-panel-edge bg-panel mb-[18px] flex flex-wrap gap-2.5 p-[14px] [&>*]:min-w-[125px] [&>*]:flex-1">
+      <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
         <OpponentTypeSelect
           value={filter.opponentType}
           onChange={(opponentType) => change({ opponentType })}
@@ -174,8 +174,8 @@ export default function GamesPage() {
           onChange={(e) => change({ opening: e.target.value || null })}
         />
       </div>
-      <div className="panel table-wrap rounded-xl border border-panel-edge bg-panel overflow-hidden">
-        <div className="table-title border-b border-panel-edge px-5 py-[17px] text-[15px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+      <div className="rounded-xl border border-panel-edge bg-panel overflow-hidden">
+        <div className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           对局记录 <span>{page.total} 局</span>
         </div>
         <table>
@@ -203,7 +203,7 @@ export default function GamesPage() {
                 <td>{g.userColor === "white" ? "白" : "黑"}</td>
                 <td>
                   <span
-                    className={`result rounded-[5px] px-2 py-1 ${resultLabel(g.result, g.userColor) === "胜" ? "win bg-[#244736] text-[#acd4b8]" : resultLabel(g.result, g.userColor) === "负" ? "loss bg-[#492b2d] text-[#f0a5a5]" : "bg-[#3b3d33] text-[#e8dfbd]"}`}
+                    className={`result rounded-control-sm px-2 py-1 ${resultLabel(g.result, g.userColor) === "胜" ? " bg-result-win text-result-win-ink" : resultLabel(g.result, g.userColor) === "负" ? " bg-result-loss text-result-loss-ink" : "bg-result-draw text-result-draw-ink"}`}
                   >
                     {resultLabel(g.result, g.userColor)}
                   </span>
@@ -218,13 +218,13 @@ export default function GamesPage() {
           </tbody>
         </table>
         {page.items.length === 0 && (
-          <div className="empty px-5 py-[60px] text-center text-[#829591]">
+          <div className="px-5 py-15 text-center text-empty">
             当前筛选下暂无对局。可调整筛选、导入 PGN 或同步 Lichess。
           </div>
         )}
-        <div className="pager flex items-center justify-end gap-[14px] border-t border-panel-edge px-[18px] py-[13px] text-[12px] text-[#8a9d96] [&_button]:px-2.5 [&_button]:py-[5px]">
+        <div className="flex items-center justify-end gap-3.5 border-t border-panel-edge px-4.5 py-3.25 text-xs text-preview [&_button]:px-2.5 [&_button]:py-1.25">
           <button
-            className="secondary border-control-edge bg-secondary text-secondary-ink"
+            className="border-control-edge bg-secondary text-secondary-ink"
             disabled={filter.offset === 0}
             onClick={() =>
               setFilter((f) => ({ ...f, offset: f.offset - f.limit }))
@@ -237,7 +237,7 @@ export default function GamesPage() {
             {Math.ceil(page.total / filter.limit)}
           </span>
           <button
-            className="secondary border-control-edge bg-secondary text-secondary-ink"
+            className="border-control-edge bg-secondary text-secondary-ink"
             disabled={filter.offset + filter.limit >= page.total}
             onClick={() =>
               setFilter((f) => ({ ...f, offset: f.offset + f.limit }))

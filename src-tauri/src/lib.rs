@@ -29,6 +29,7 @@ pub fn run() {
             commands::get_puzzle,
             commands::delete_puzzle,
             commands::get_schedule,
+            commands::get_due_forecast,
             commands::record_review,
             commands::get_setting,
             commands::set_setting,

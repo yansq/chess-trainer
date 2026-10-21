@@ -30,6 +30,89 @@
   --color-chart-grid: #28333a;
   --color-chart-axis: #81918f;
   --color-chart-bar: #81aa91;
+
+  /* Shared application roles. */
+  --color-sidebar-edge: #283739;
+  --color-brand-ink: #a2cbaa;
+  --color-heading: #f2f6f3;
+  --color-brand-muted: #718581;
+  --color-empty: #829591;
+  --color-description: #8d9e9b;
+  --color-eyebrow-ink: #81ad94;
+  --color-notice-edge: #456457;
+  --color-notice: #22392e;
+  --color-notice-ink: #cce9d4;
+  --color-board-frame: #223033;
+  --color-coordinate: #8da39a;
+  --color-fen: #b7c9c1;
+  --color-caption-ink: #7d928d;
+  --color-candidate-edge: #3b5a4c;
+  --color-candidate-hover: #22352d;
+  --color-candidate-ink: #9cac9f;
+  --color-help: #94a7a0;
+  --color-move: #c4d1cc;
+  --color-move-number: #789389;
+  --color-result-win: #244736;
+  --color-result-win-ink: #acd4b8;
+  --color-result-loss: #492b2d;
+  --color-result-loss-ink: #f0a5a5;
+  --color-result-draw: #3b3d33;
+  --color-result-draw-ink: #e8dfbd;
+  --color-preview: #8a9d96;
+  --color-training-description: #9baea5;
+  --color-answer: #233b32;
+  --color-settings-description: #93a69d;
+  --color-switch-off: #738080;
+  --color-field-hover: #587168;
+  --color-nav-selected-ink: #c6e8ce;
+  --color-nav-selected: #263a35;
+  --color-nav-ink: #a2b0ad;
+  --color-nav-hover: #1e2b2d;
+  --color-table-head: #1a282a;
+  --color-table-caption: #81938e;
+  --color-table-edge: #273639;
+  --color-table-ink: #d6dfdc;
+  --color-table-hover: #203032;
+  --color-quality-good: #16a34a;
+  --color-quality-inaccuracy: #facc15;
+  --color-quality-inaccuracy-ink: #422006;
+  --color-quality-mistake: #f97316;
+  --color-quality-blunder: #dc2626;
+  --color-quality-ink: #fff;
+  --color-danger: #fca5a5;
+  --color-danger-ink: #fecaca;
+  --color-danger-edge: #b91c1c;
+  --color-danger-muted: #7f1d1d;
+  --background-color-danger: #450a0a;
+  --text-page-title: 32px;
+  --leading-heading: 1.1;
+  --tracking-heading: -0.045em;
+  --text-micro: 9px;
+  --text-eyebrow: 10px;
+  --text-caption: 11px;
+  --text-body-sm: 13px;
+  --text-body: 15px;
+  --text-brand: 17px;
+  --text-panel-title: 23px;
+  --text-editor-title: 26px;
+  --font-weight-emphasis: 750;
+  --font-weight-control: 650;
+  --tracking-brand: -0.03em;
+  --tracking-label: 0.18em;
+  --tracking-eyebrow: 0.2em;
+  --leading-compact: 1.4;
+  --leading-copy: 1.6;
+  --leading-annotation: 1.7;
+  --leading-answer: 1.8;
+  --radius-control-sm: 5px;
+  --radius-control: 7px;
+  --radius-nav: 9px;
+  --radius-popover: 10px;
+  --shadow-board: 0 16px 35px #0004;
+  --shadow-focus: 0 0 0 2px #80b49333;
+  --shadow-popover: 0 12px 32px #0006;
+  --shadow-toggle: 0 1px 3px #0003;
+  --ease-switch: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @layer base {
@@ -47,38 +130,149 @@
     @apply [font:inherit];
   }
   button {
-    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-[14px] py-[9px] font-[650] whitespace-nowrap text-accent-dark;
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-3.5 py-2.25 font-control whitespace-nowrap text-accent-dark;
   }
   button:hover {
-    @apply brightness-[1.12];
+    @apply brightness-112;
   }
   button:disabled {
     @apply cursor-not-allowed opacity-45;
   }
   input,
   textarea {
-    @apply rounded-[7px] border border-field-edge bg-field px-3 py-2.5 text-app outline-none;
+    @apply rounded-control border border-field-edge bg-field px-3 py-2.5 text-app outline-none;
   }
   input:focus,
   textarea:focus {
-    @apply border-focus shadow-[0_0_0_2px_#80b49333];
+    @apply border-focus shadow-focus;
   }
   textarea {
     @apply w-full resize-y;
   }
   h1 {
-    @apply my-2 text-[32px] leading-[1.1] tracking-[-0.045em];
+    @apply my-2 text-page-title leading-heading tracking-heading;
   }
   table {
-    @apply w-full border-collapse text-[13px];
+    @apply w-full border-collapse text-body-sm;
   }
   th {
-    @apply bg-[#1a282a] px-[18px] py-3 text-left text-[11px] font-[650] text-[#81938e];
+    @apply bg-table-head px-4.5 py-3 text-left text-caption font-control text-table-caption;
   }
   td {
-    @apply border-t border-[#273639] px-[18px] py-[14px] text-[#d6dfdc];
+    @apply border-t border-table-edge px-4.5 py-3.5 text-table-ink;
   }
   tbody tr {
-    @apply cursor-pointer hover:bg-[#203032];
+    @apply cursor-pointer hover:bg-table-hover;
   }
+}
+
+/* Layout and third-party component contracts shared by the application. */
+@utility sidebar-wide {
+  --sidebar-width: 220px;
+}
+
+@utility sidebar-compact {
+  --sidebar-width: 64px;
+}
+
+@utility grid-cols-shell {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+
+@utility w-sidebar {
+  width: var(--sidebar-width);
+}
+
+@utility grid-cols-analysis {
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 1fr);
+}
+
+@utility grid-rows-analysis {
+  grid-template-rows: minmax(0, 1fr) minmax(128px, 20%);
+}
+
+@utility container-size {
+  container-type: size;
+}
+
+@utility w-analysis-board {
+  width: min(100cqw, calc(100cqh - 76px));
+}
+
+@utility size-move-badge {
+  width: clamp(18px, 2vw, 26px);
+  height: clamp(18px, 2vw, 26px);
+}
+
+@utility text-move-badge {
+  font-size: clamp(11px, 1.2vw, 15px);
+}
+
+@utility w-editor-field {
+  width: calc(100% - 24px);
+}
+
+@utility w-note-field {
+  width: calc(100% - 12px);
+}
+
+@utility font-inherit {
+  font: inherit;
+}
+
+@utility text-inherit-size {
+  font-size: inherit;
+}
+
+@utility grid-cols-puzzle {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
+}
+
+@utility w-puzzle-board {
+  width: min(100cqw, 100cqh);
+}
+
+@utility grid-cols-training {
+  grid-template-columns: minmax(400px, 620px) minmax(300px, 1fr);
+}
+
+@utility grid-cols-training-compact {
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+}
+
+@utility w-toggle-thumb {
+  width: calc((100% - 8px) / 2);
+}
+
+@utility rounded-inherit {
+  border-radius: inherit;
+}
+
+@utility content-empty {
+  --tw-content: "";
+  content: var(--tw-content);
+}
+
+@utility min-w-select {
+  min-width: var(--radix-select-trigger-width);
+}
+
+@utility max-w-select {
+  max-width: var(--radix-select-content-available-width);
+}
+
+@utility max-h-select {
+  max-height: min(320px, var(--radix-select-content-available-height));
+}
+
+@utility bg-volume {
+  background-image: linear-gradient(
+    to right,
+    var(--color-accent) var(--sound-volume),
+    var(--color-control-edge) var(--sound-volume)
+  );
+}
+
+@utility section-title {
+  font-weight: 700;
 }

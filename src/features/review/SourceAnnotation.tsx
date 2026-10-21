@@ -37,25 +37,25 @@ export default function SourceAnnotation({ puzzle }: { puzzle: Puzzle }) {
     return null;
   return (
     <section
-      className="source-annotation mt-5 border-t border-control-edge pt-4 [&_h3]:mb-2 [&_h3]:mt-0 [&_h3]:text-[14px] [&_h3]:font-[650]"
+      className="mt-5 border-t border-control-edge pt-4 [&_h3]:mb-2 [&_h3]:mt-0 [&_h3]:text-sm [&_h3]:font-control"
       aria-label="来源局面注释"
     >
       <h3>来源局面注释</h3>
       {state.status === "loading" && (
-        <p className="muted text-muted" role="status">
+        <p className="text-muted" role="status">
           正在加载注释…
         </p>
       )}
       {state.status === "loaded" && (
-        <div className="source-annotation-markdown text-[13px] leading-[1.7] text-[#c4d1cc] [overflow-wrap:anywhere] [&_p]:my-2 [&_p]:text-inherit [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-accent-edge [&_blockquote]:pl-3 [&_a]:text-accent-ink [&_a]:underline [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:bg-field [&_pre]:p-2">
+        <div className="text-body-sm leading-annotation text-move wrap-anywhere [&_p]:my-2 [&_p]:text-inherit [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-accent-edge [&_blockquote]:pl-3 [&_a]:text-accent-ink [&_a]:underline [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:bg-field [&_pre]:p-2">
           <ReactMarkdown>{state.content}</ReactMarkdown>
         </div>
       )}
       {state.status === "error" && (
         <>
-          <p className="muted text-muted">来源注释暂时无法加载。</p>
+          <p className="text-muted">来源注释暂时无法加载。</p>
           <button
-            className="secondary border-control-edge bg-secondary text-secondary-ink"
+            className="border-control-edge bg-secondary text-secondary-ink"
             onClick={() => {
               setState({ status: "loading" });
               setRetry((value) => value + 1);

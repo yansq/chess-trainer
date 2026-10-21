@@ -55,16 +55,16 @@ export default function StatisticsPage() {
   }, [color, speed, from, to, opponentType]);
   return (
     <>
-      <div className="page-head mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
+      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
         <div>
-          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             PERFORMANCE
           </div>
           <h1>开局统计</h1>
         </div>
         <button
           type="button"
-          className="statistics-view-switch relative grid min-h-[42px] w-[136px] shrink-0 grid-cols-2 gap-0 rounded-full border border-control-edge bg-sidebar p-1 text-[13px] text-engine-muted select-none transition-transform duration-[120ms] ease-[cubic-bezier(0.23,1,0.32,1)] before:absolute before:inset-y-1 before:left-1 before:w-[calc((100%_-_8px)/2)] before:rounded-[inherit] before:bg-selected before:shadow-[0_1px_3px_#0003] before:content-[''] before:transition-transform before:duration-[180ms] before:ease-[cubic-bezier(0.23,1,0.32,1)] aria-checked:before:translate-x-full [&_span]:relative [&_span]:z-1 hover:filter-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[#a2cbaa] focus-visible:outline-offset-[3px] focus-visible:scale-100 focus-visible:transition-none focus-visible:before:transition-none motion-reduce:transition-none motion-reduce:before:transition-none motion-reduce:active:scale-100"
+          className="relative grid min-h-10.5 w-34 shrink-0 grid-cols-2 gap-0 rounded-full border border-control-edge bg-sidebar p-1 text-body-sm text-engine-muted select-none transition-transform duration-120 ease-switch before:absolute before:inset-y-1 before:left-1 before:w-toggle-thumb before:rounded-inherit before:bg-selected before:shadow-toggle before:content-empty before:transition-transform before:duration-180 before:ease-switch aria-checked:before:translate-x-full [&_span]:relative [&_span]:z-1 hover:filter-none active:scale-98 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-brand-ink focus-visible:outline-offset-3 focus-visible:scale-100 focus-visible:transition-none focus-visible:before:transition-none motion-reduce:transition-none motion-reduce:before:transition-none motion-reduce:active:scale-100"
           role="switch"
           aria-label="细分开局统计"
           aria-checked={!isFamily}
@@ -74,24 +74,24 @@ export default function StatisticsPage() {
         >
           <span
             aria-hidden="true"
-            className={isFamily ? "selected text-selected-ink" : ""}
+            className={isFamily ? " text-selected-ink" : ""}
           >
             大类
           </span>
           <span
             aria-hidden="true"
-            className={isFamily ? "" : "selected text-selected-ink"}
+            className={isFamily ? "" : " text-selected-ink"}
           >
             细分
           </span>
         </button>
       </div>
       {error && (
-        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
           {error}
         </div>
       )}
-      <div className="panel filters rounded-xl border border-panel-edge bg-panel mb-[18px] flex flex-wrap gap-2.5 p-[14px] [&>*]:min-w-[125px] [&>*]:flex-1">
+      <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
         <OpponentTypeSelect value={opponentType} onChange={setOpponentType} />
         <Select
           label="执棋颜色"
@@ -122,7 +122,7 @@ export default function StatisticsPage() {
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
       </div>
       {rows.length > 0 && (
-        <div className="panel chart-panel rounded-xl border border-panel-edge bg-panel mb-[18px] p-[18px]">
+        <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 p-4.5">
           <ResponsiveContainer width="100%" height={isFamily ? 300 : 230}>
             <BarChart
               data={rows.slice(0, 8)}
@@ -172,8 +172,8 @@ export default function StatisticsPage() {
           </ResponsiveContainer>
         </div>
       )}
-      <div className="panel table-wrap rounded-xl border border-panel-edge bg-panel overflow-hidden">
-        <div className="table-title border-b border-panel-edge px-5 py-[17px] text-[15px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+      <div className="rounded-xl border border-panel-edge bg-panel overflow-hidden">
+        <div className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           {isFamily ? "开局大类" : "开局细分"}
           <span>
             {rows.length} {isFamily ? "类" : "项"} · {total} 局
@@ -208,7 +208,7 @@ export default function StatisticsPage() {
           </tbody>
         </table>
         {rows.length === 0 && (
-          <div className="empty px-5 py-[60px] text-center text-[#829591]">
+          <div className="px-5 py-15 text-center text-empty">
             暂无可统计的对局。
           </div>
         )}

@@ -6,6 +6,7 @@ import type { Puzzle } from "../../shared/types";
 import { tryMove, uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound } from "../../shared/audio/move-sound";
 import { scheduleReview, type Rating } from "./scheduler";
+import DueForecast from "./DueForecast";
 import SourceAnnotation from "./SourceAnnotation";
 import { isMultiMovePuzzle } from "../puzzles/answers";
 import {
@@ -18,6 +19,7 @@ function clockNow() {
   return Date.now();
 }
 export default function ReviewPage() {
+  const [forecastRefresh, setForecastRefresh] = useState(0);
   const [queue, setQueue] = useState<Puzzle[]>([]);
   const [attempt, setAttempt] = useState<PuzzleAttempt | null>(null);
   const [selectedSquare, setSelectedSquare] = useState<{
@@ -29,7 +31,9 @@ export default function ReviewPage() {
     from: string;
     to: string;
   } | null>(null);
-  const revealed = attempt?.complete ?? false;
+  const [answerShown, setAnswerShown] = useState(false);
+  const [hadMistake, setHadMistake] = useState(false);
+  const revealed = answerShown || (attempt?.complete ?? false);
   const [solutionStep, setSolutionStep] = useState(0);
   const [message, setMessage] = useState("");
   const [started, setStarted] = useState(() => clockNow());
@@ -50,10 +54,10 @@ export default function ReviewPage() {
     !promotion
       ? selectedSquare?.square
       : null;
-  const correct = attempt?.correct ?? false;
+  const correct = !answerShown && (attempt?.correct ?? false);
   const multiMove = current ? isMultiMovePuzzle(current) : false;
   useEffect(() => {
-    if (!current || !attempt || !waitingForReply) return;
+    if (!current || !attempt || !waitingForReply || revealed) return;
     return schedulePuzzleReply(
       current,
       attempt,
@@ -68,7 +72,7 @@ export default function ReviewPage() {
       },
       setMessage,
     );
-  }, [current, attempt, waitingForReply]);
+  }, [current, attempt, waitingForReply, revealed]);
   let solutionFen = current?.fen;
   for (let i = 0; i < solutionStep; i++) {
     const u = current?.solutionLine[i];
@@ -93,15 +97,16 @@ export default function ReviewPage() {
       setPromotion(null);
       setSelectedSquare(null);
       setAttempt(played);
-      playMoveSound(played.san);
+      if (!played.correct) setHadMistake(true);
+      else playMoveSound(played.san);
       setMessage(
         !played.correct
-          ? "再想想。你可以查看正确答案并给本题评级。"
+          ? "这一步不对，请继续尝试；需要帮助时可点击「显示答案」。"
           : played.complete
             ? "正确！请选择复习评级。"
             : "正确，等待对手走棋…",
       );
-      return true;
+      return played.correct;
     } catch (error) {
       setMessage(String(error));
       return false;
@@ -118,6 +123,13 @@ export default function ReviewPage() {
       return;
     }
     if (selected) move(selected, square);
+  }
+  function showAnswer() {
+    setAnswerShown(true);
+    setSelectedSquare(null);
+    setPromotion(null);
+    setSolutionStep(0);
+    setMessage("已显示答案，请查看正确走法后选择复习评级。");
   }
   function advanceSolution() {
     if (!current) return;
@@ -143,12 +155,15 @@ export default function ReviewPage() {
         playedMove:
           attempt?.moves.filter((_, index) => index % 2 === 0).join(" ") ??
           null,
-        isCorrect: !!correct,
+        isCorrect: !!correct && !hadMistake,
         rating,
         timeSpentMs: clockNow() - started,
       });
+      setForecastRefresh((value) => value + 1);
       setQueue((q) => q.slice(1));
       setAttempt(null);
+      setAnswerShown(false);
+      setHadMistake(false);
       setSelectedSquare(null);
       setPromotion(null);
       setSolutionStep(0);
@@ -160,9 +175,9 @@ export default function ReviewPage() {
   }
   return (
     <>
-      <div className="page-head mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
+      <div className="mb-3 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
         <div>
-          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             SPACED REVIEW
           </div>
           <h1>今日训练</h1>
@@ -172,18 +187,19 @@ export default function ReviewPage() {
           </p>
         </div>
       </div>
+      <DueForecast refreshKey={forecastRefresh} />
       {message && !current && (
-        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
           {message}
         </div>
       )}
       {!current ? (
-        <div className="panel empty full rounded-xl border border-panel-edge bg-panel px-5 py-[60px] text-center text-[#829591] grid min-h-[280px] place-items-center">
+        <div className="rounded-xl border border-panel-edge bg-panel px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
           今天没有待复习的题目。你可以在复盘中继续创建题目。
         </div>
       ) : (
-        <div className="training-layout grid grid-cols-[minmax(400px,620px)_minmax(300px,1fr)] items-start gap-6 max-[1150px]:grid-cols-[minmax(320px,1fr)_minmax(320px,1fr)] max-[900px]:grid-cols-1">
-          <div className="board-frame w-full overflow-hidden rounded-lg border-8 border-[#223033] shadow-[0_16px_35px_#0004]">
+        <div className="grid grid-cols-training items-start gap-6 max-[1150px]:grid-cols-training-compact max-[900px]:grid-cols-1">
+          <div className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
             <Chessboard
               options={{
                 position: solutionStep > 0 ? solutionFen : fen,
@@ -211,15 +227,15 @@ export default function ReviewPage() {
               }}
             />
           </div>
-          <div className="panel training-info rounded-xl border border-panel-edge bg-panel p-7 [&_h2]:text-[23px] [&_p]:text-[#9baea5]">
-            <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="rounded-xl border border-panel-edge bg-panel p-7 [&_h2]:text-panel-title [&_p]:text-training-description">
+            <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
               PUZZLE {queue.length} REMAINING
             </div>
             <h2>{current.title}</h2>
             <p>{current.description || "找到当前局面的最佳走法。"}</p>
             <div role="status" aria-live="polite">
               {message && (
-                <div className="notice my-4 rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+                <div className="my-4 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
                   {message}
                 </div>
               )}
@@ -247,7 +263,7 @@ export default function ReviewPage() {
                   </button>
                 ))}
                 <button
-                  className="secondary border-control-edge bg-secondary text-secondary-ink"
+                  className="border-control-edge bg-secondary text-secondary-ink"
                   onClick={() => setPromotion(null)}
                 >
                   取消
@@ -260,9 +276,17 @@ export default function ReviewPage() {
                 {Math.ceil(current.solutionLine.length / 2)} 步
               </p>
             )}
+            {!revealed && (
+              <button
+                className="mt-4 border-control-edge bg-secondary text-secondary-ink"
+                onClick={showAnswer}
+              >
+                显示答案
+              </button>
+            )}
             {revealed && (
               <>
-                <div className="answer my-[30px] rounded-lg bg-[#233b32] p-[15px] leading-[1.8]">
+                <div className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
                   <strong>{correct ? "回答正确" : "本题答案"}</strong>
                   <div>
                     标准走法：
@@ -279,7 +303,7 @@ export default function ReviewPage() {
                         )}
                       </div>
                       <button
-                        className="secondary border-control-edge bg-secondary text-secondary-ink"
+                        className="border-control-edge bg-secondary text-secondary-ink"
                         onClick={advanceSolution}
                       >
                         播放变化 {solutionStep}/{current.solutionLine.length}
@@ -290,7 +314,7 @@ export default function ReviewPage() {
                 <SourceAnnotation key={current.id} puzzle={current} />
               </>
             )}
-            <div className="rating-row mt-[30px] flex flex-wrap gap-2">
+            <div className="mt-7.5 flex flex-wrap gap-2">
               {(["Again", "Hard", "Good", "Easy"] as const).map((r) => (
                 <button
                   key={r}
@@ -298,7 +322,7 @@ export default function ReviewPage() {
                   className={
                     r === "Good"
                       ? ""
-                      : "secondary border-control-edge bg-secondary text-secondary-ink"
+                      : " border-control-edge bg-secondary text-secondary-ink"
                   }
                   onClick={() => void rate(r)}
                 >

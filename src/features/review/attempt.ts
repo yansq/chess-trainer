@@ -29,6 +29,16 @@ export function playPuzzleMove(
   const correct = multiMove
     ? played.uci === puzzle.solutionLine[step]
     : puzzle.expectedMoves.includes(played.uci);
+  // Reject the move without advancing the board or the answer sequence.
+  if (!correct) {
+    return {
+      fen: previous?.fen ?? puzzle.fen,
+      moves: [...(previous?.moves ?? [])],
+      san: played.san,
+      correct: false,
+      complete: false,
+    };
+  }
   const result: PuzzleAttempt = {
     fen: played.fen,
     moves: [...(previous?.moves ?? []), played.uci],

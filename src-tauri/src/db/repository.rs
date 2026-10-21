@@ -451,6 +451,33 @@ pub fn puzzles(db: &Connection, due: bool, category: Option<&str>) -> Result<Vec
         result
     }
 }
+// Boundaries are local calendar midnights converted to UTC by the client.
+// Query all schedules, independent of the training queue's pagination limit.
+pub fn due_forecast(db: &Connection, boundaries: &[String]) -> Result<Vec<i64>, String> {
+    if boundaries.len() != 4 {
+        return Err("到期预告需要四个日期边界".into());
+    }
+    let mut dates = Vec::new();
+    for boundary in boundaries {
+        let value: Option<f64> = db
+            .query_row("SELECT julianday(?1)", [boundary], |r| r.get(0))
+            .map_err(err)?;
+        dates.push(value.ok_or("无效的到期预告日期")?);
+    }
+    if dates.windows(2).any(|w| w[0] >= w[1]) {
+        return Err("到期预告日期必须递增".into());
+    }
+    db.query_row(
+        "SELECT COUNT(CASE WHEN julianday(s.due_at)>=?1 AND julianday(s.due_at)<?2 THEN 1 END),
+                COUNT(CASE WHEN julianday(s.due_at)>=?2 AND julianday(s.due_at)<?3 THEN 1 END),
+                COUNT(CASE WHEN julianday(s.due_at)>=?3 AND julianday(s.due_at)<?4 THEN 1 END)
+         FROM review_schedules s JOIN puzzles p ON p.id=s.puzzle_id
+         WHERE julianday(s.due_at)>=?1 AND julianday(s.due_at)<?4",
+        params![dates[0], dates[1], dates[2], dates[3]],
+        |r| Ok(vec![r.get(0)?, r.get(1)?, r.get(2)?]),
+    )
+    .map_err(err)
+}
 pub fn schedule(db: &Connection, id: &str) -> Result<Schedule, String> {
     db.query_row("SELECT puzzle_id,due_at,interval_days,ease_factor,repetitions,lapses,last_reviewed_at,total_attempts,correct_count FROM review_schedules WHERE puzzle_id=?1",[id],|r|Ok(Schedule{puzzle_id:r.get(0)?,due_at:r.get(1)?,interval_days:r.get(2)?,ease_factor:r.get(3)?,repetitions:r.get(4)?,lapses:r.get(5)?,last_reviewed_at:r.get(6)?,total_attempts:r.get(7)?,correct_count:r.get(8)?})).map_err(err)
 }
@@ -685,6 +712,74 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(get_game(&db, "lichess:abcdefgh").unwrap().moves.len(), 1)
     }
+    #[test]
+    fn due_forecast_counts_local_calendar_days_without_queue_limits() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let boundaries: Vec<String> = [
+            "2026-10-20T16:00:00.000Z",
+            "2026-10-21T16:00:00.000Z",
+            "2026-10-22T16:00:00.000Z",
+            "2026-10-23T16:00:00.000Z",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![0, 0, 0]);
+        let times = [
+            "2026-10-19T00:00:00Z",
+            "2026-10-20T15:59:59.999Z",
+            "2026-10-20T16:00:00.000Z",
+            "2026-10-21T15:59:59.999Z",
+            "2026-10-22T00:00:00+08:00",
+            "2026-10-22T16:00:00Z",
+            "2026-10-23T16:00:00Z",
+            "invalid",
+        ];
+        for (index, time) in times.iter().enumerate() {
+            let id = format!("forecast-{index}");
+            save_puzzle(&db, named_puzzle(&id, None, "forecast")).unwrap();
+            db.execute(
+                "UPDATE review_schedules SET due_at=?2 WHERE puzzle_id=?1",
+                params![id, time],
+            )
+            .unwrap();
+        }
+        for index in 0..70 {
+            let id = format!("extra-{index}");
+            save_puzzle(&db, named_puzzle(&id, None, "forecast")).unwrap();
+            db.execute(
+                "UPDATE review_schedules SET due_at=?2 WHERE puzzle_id=?1",
+                params![id, "2026-10-21T03:00:00Z"],
+            )
+            .unwrap();
+        }
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![72, 1, 1]);
+        let mut updated = schedule(&db, "forecast-2").unwrap();
+        updated.due_at = boundaries[1].clone();
+        record_review(
+            &mut db,
+            ReviewInput {
+                schedule: updated,
+                played_move: None,
+                is_correct: true,
+                rating: "Good".into(),
+                time_spent_ms: 100,
+            },
+        )
+        .unwrap();
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![71, 2, 1]);
+        delete_puzzle(&db, "forecast-5").unwrap();
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![71, 2, 0]);
+        assert!(due_forecast(&db, &boundaries[..3]).is_err());
+        let mut invalid = boundaries.clone();
+        invalid[1] = "not-a-date".into();
+        assert!(due_forecast(&db, &invalid).is_err());
+        let mut reversed = boundaries.clone();
+        reversed.swap(1, 2);
+        assert!(due_forecast(&db, &reversed).is_err());
+    }
+
     fn named_puzzle(id: &str, game_id: Option<&str>, title: &str) -> Puzzle {
         Puzzle {
             id: id.into(),

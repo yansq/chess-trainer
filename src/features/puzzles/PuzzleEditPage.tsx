@@ -98,6 +98,54 @@ export default function PuzzleEditPage() {
       setBusy(false);
     }
   }
+  let preview = {
+    positions: [puzzle?.fen ?? ""],
+    sans: [] as string[],
+    alternatives: [] as string[],
+  };
+  let answerError = "";
+  try {
+    if (puzzle) preview = puzzlePreview(puzzle, answers, alternative);
+  } catch (error) {
+    answerError = String(error).replace(/^Error: /, "");
+  }
+  const previewLength = preview.sans.length;
+  useEffect(() => {
+    if (!puzzle || busy || confirmDelete) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+      )
+        return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="combobox"], [role="listbox"], [role="option"]',
+        )
+      )
+        return;
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? -1 : 1;
+      setStep((previous) =>
+        Math.max(
+          0,
+          Math.min(
+            previewLength,
+            Math.min(previous, previewLength) + direction,
+          ),
+        ),
+      );
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [puzzle, previewLength, busy, confirmDelete]);
   if (!puzzle)
     return (
       <div className="grid gap-4 p-4">
@@ -107,26 +155,15 @@ export default function PuzzleEditPage() {
         </button>
       </div>
     );
-  let preview = {
-    positions: [puzzle.fen],
-    sans: [] as string[],
-    alternatives: [] as string[],
-  };
-  let answerError = "";
-  try {
-    preview = puzzlePreview(puzzle, answers, alternative);
-  } catch (error) {
-    answerError = String(error).replace(/^Error: /, "");
-  }
-  const currentStep = Math.min(step, preview.sans.length);
+  const currentStep = Math.min(step, previewLength);
   return (
-    <div className="puzzle-edit-page flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex shrink-0 items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.2em] text-accent-ink">
+          <div className="text-eyebrow font-bold tracking-eyebrow text-accent-ink">
             PUZZLE EDITOR
           </div>
-          <h1 className="!text-[26px]">编辑题目</h1>
+          <h1 className="!text-editor-title">编辑题目</h1>
         </div>
         <button
           className={secondary}
@@ -137,23 +174,23 @@ export default function PuzzleEditPage() {
         </button>
       </header>
       <div
-        className="min-h-6 shrink-0 text-[13px] text-accent-ink"
+        className="min-h-6 shrink-0 text-body-sm text-accent-ink"
         role="status"
         aria-live="polite"
       >
         {message}
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,0.95fr)] gap-5">
+      <div className="grid min-h-0 flex-1 grid-cols-puzzle gap-5">
         <section
-          className="puzzle-preview flex min-h-0 min-w-0 flex-col gap-3"
+          className="flex min-h-0 min-w-0 flex-col gap-3"
           aria-label="题目棋盘预览"
         >
-          <div className="flex shrink-0 justify-between text-[13px] text-engine-muted">
+          <div className="flex shrink-0 justify-between text-body-sm text-engine-muted">
             <span>{puzzle.sideToMove === "white" ? "白方" : "黑方"}走棋</span>
             <span>答案预览</span>
           </div>
-          <div className="min-h-0 flex-1 [container-type:size]">
-            <div className="puzzle-edit-board mx-auto w-[min(100cqw,100cqh)] rounded-lg border border-panel-edge bg-panel p-2">
+          <div className="min-h-0 flex-1 container-size">
+            <div className="mx-auto w-puzzle-board rounded-lg border border-panel-edge bg-panel p-2">
               <Chessboard
                 options={{
                   id: "puzzle-editor-board",
@@ -185,17 +222,21 @@ export default function PuzzleEditPage() {
             <button
               className={secondary}
               aria-label="上一步"
+              aria-keyshortcuts="ArrowLeft"
+              title="上一步（←）"
               disabled={currentStep === 0}
               onClick={() => setStep(currentStep - 1)}
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="flex items-center text-[13px] text-engine-muted">
+            <span className="flex items-center text-body-sm text-engine-muted">
               {currentStep} / {preview.sans.length}
             </span>
             <button
               className={secondary}
               aria-label="下一步"
+              aria-keyshortcuts="ArrowRight"
+              title="下一步（→）"
               disabled={currentStep >= preview.sans.length}
               onClick={() => setStep(currentStep + 1)}
             >
@@ -217,12 +258,12 @@ export default function PuzzleEditPage() {
               <RotateCcw size={16} />
             </button>
           </div>
-          <p className="m-0 shrink-0 text-center text-[12px] text-engine-muted">
-            修改答案后，可逐步查看棋盘上的走法。
+          <p className="m-0 shrink-0 text-center text-xs text-engine-muted">
+            使用 ← / → 方向键或按钮，逐步查看棋盘上的走法。
           </p>
         </section>
         <form
-          className="puzzle-editor flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel"
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel"
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -230,7 +271,7 @@ export default function PuzzleEditPage() {
         >
           <fieldset
             disabled={busy || confirmDelete}
-            className="m-0 grid min-h-0 flex-1 content-start gap-3 overflow-auto border-0 p-4 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[13px] [&_input]:min-w-0 [&_textarea]:min-w-0 [&_textarea]:resize-none"
+            className="m-0 grid min-h-0 flex-1 content-start gap-3 overflow-auto border-0 p-4 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-body-sm [&_input]:min-w-0 [&_textarea]:min-w-0 [&_textarea]:resize-none"
           >
             <label>
               分类
@@ -283,7 +324,7 @@ export default function PuzzleEditPage() {
             </label>
             <p
               id="answer-help"
-              className={`m-0 text-[12px] ${answerError ? "text-red-300" : "text-engine-muted"}`}
+              className={`m-0 text-xs ${answerError ? "text-danger" : "text-engine-muted"}`}
             >
               {answerError ||
                 (usesAnswerSequence(puzzle)
@@ -329,7 +370,7 @@ export default function PuzzleEditPage() {
                 </p>
                 <p
                   id="delete-description"
-                  className="text-[13px] text-engine-muted"
+                  className="text-body-sm text-engine-muted"
                 >
                   题目及其复习记录会一并删除，此操作无法撤销。
                 </p>
@@ -337,7 +378,7 @@ export default function PuzzleEditPage() {
                   <button
                     type="button"
                     disabled={busy}
-                    className="border-red-700 bg-red-950 text-red-200"
+                    className="border-danger-edge bg-danger text-danger-ink"
                     onClick={() => void remove()}
                   >
                     {busy ? "删除中…" : "确认删除"}
@@ -370,7 +411,7 @@ export default function PuzzleEditPage() {
                   ref={deleteButton}
                   type="button"
                   disabled={busy}
-                  className="ml-auto border-red-900 bg-transparent text-red-300"
+                  className="ml-auto border-danger-muted bg-transparent text-danger"
                   onClick={() => setConfirmDelete(true)}
                 >
                   删除题目

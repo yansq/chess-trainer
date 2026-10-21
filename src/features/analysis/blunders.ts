@@ -47,3 +47,30 @@ export function classifyMove(
           : "Inaccuracy",
   };
 }
+
+// Display ratings are separate from mistake candidates used to create puzzles.
+// Small losses use the same evaluation model as the existing mistake ratings.
+export function evaluateMoveQuality(
+  move: Move,
+  side: "white" | "black",
+  before: EngineAnalysis,
+  after: EngineAnalysis,
+  thresholds = { inaccuracy: 0.12, mistake: 0.25, blunder: 0.4 },
+): { candidate: Candidate | null; category: Category | "Good" | null } {
+  if (
+    before.fen !== move.fenBefore ||
+    after.fen !== move.fenAfter ||
+    !before.variations.length ||
+    !after.variations.length ||
+    !before.variations[0].pv.length
+  )
+    return { candidate: null, category: null };
+  const candidate = classifyMove(move, side, before, after, thresholds);
+  if (candidate) return { candidate, category: candidate.category };
+  const bestMove = before.variations[0].pv[0];
+  const loss = winChance(before, side) - winChance(after, side);
+  return {
+    candidate: null,
+    category: bestMove === move.uci || loss <= 0.05 ? "Good" : null,
+  };
+}

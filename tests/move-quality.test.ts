@@ -5,6 +5,10 @@ import {
   type MoveQuality,
 } from "../src/features/analysis/move-quality";
 import type { EngineAnalysis } from "../src/shared/api";
+import {
+  evaluateMoveQuality,
+  classifyMove,
+} from "../src/features/analysis/blunders";
 import type { Move } from "../src/shared/types";
 
 function moveFor(side: "white" | "black"): Move {
@@ -63,6 +67,47 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("复盘双方招法等级", () => {
   for (const side of ["white", "black"] as const) {
+    it.each([0, 30])(
+      `${side} 接近最佳的招法损失 %i 厘兵标为 Good`,
+      async (loss) => {
+        const move = moveFor(side),
+          t = setup(move);
+        t.after.variations[0].scoreValue = side === "white" ? -loss : loss;
+        startMoveQualityAnalysis(move, t.after, t.changed, t.engineApi);
+        await flush();
+        expect(t.changes[0].category).toBeNull();
+        expect(t.changes.at(-1)).toMatchObject({
+          category: "Good",
+          candidate: null,
+          status: "",
+        });
+        expect(
+          classifyMove(move, side, analysis(move.fenBefore, 0), t.after),
+        ).toBeNull();
+      },
+    );
+    it(`${side} 高于 Good 阈值但低于失误阈值时不误标`, async () => {
+      const move = moveFor(side),
+        t = setup(move);
+      t.after.variations[0].scoreValue = side === "white" ? -31 : 31;
+      startMoveQualityAnalysis(move, t.after, t.changed, t.engineApi);
+      await flush();
+      expect(t.changes.at(-1)).toMatchObject({
+        category: null,
+        candidate: null,
+        status: "",
+      });
+    });
+    it(`${side} 引擎首选招法标为 Good`, () => {
+      const move = moveFor(side),
+        before = analysis(move.fenBefore, 0),
+        after = analysis(move.fenAfter, 0);
+      before.variations[0].pv = [move.uci];
+      expect(evaluateMoveQuality(move, side, before, after)).toMatchObject({
+        category: "Good",
+        candidate: null,
+      });
+    });
     it.each([
       [100, "Inaccuracy"],
       [200, "Mistake"],
@@ -79,6 +124,7 @@ describe("复盘双方招法等级", () => {
       );
       await flush();
       expect(t.changes.at(-1)?.candidate?.category).toBe(category);
+      expect(t.changes.at(-1)?.category).toBe(category);
       expect(t.changes.at(-1)?.moveId).toBe(move.id);
       expect(t.engineApi.engineAnalyze).toHaveBeenCalledTimes(1);
       expect(t.engineApi.engineAnalyze.mock.calls[0][1]).toBe(move.fenBefore);
@@ -86,7 +132,7 @@ describe("复盘双方招法等级", () => {
       expect(t.engineApi.engineStop).not.toHaveBeenCalled();
     });
   }
-  it("遵循设置中的阈值，正常招法不标记", async () => {
+  it("遵循设置中的阈值，中等损失不标记", async () => {
     const move = moveFor("white");
     const t = setup(move);
     t.after.variations[0].scoreValue = -100;
@@ -100,6 +146,23 @@ describe("复盘双方招法等级", () => {
     startMoveQualityAnalysis(move, t.after, t.changed, t.engineApi);
     await flush();
     expect(t.changes.at(-1)).toMatchObject({ candidate: null, status: "" });
+  });
+  it("自定义失误阈值优先于 Good，空主变不产生好棋标记", () => {
+    const move = moveFor("white"),
+      before = analysis(move.fenBefore, 0),
+      after = analysis(move.fenAfter, -30);
+    expect(
+      evaluateMoveQuality(move, "white", before, after, {
+        inaccuracy: 0.01,
+        mistake: 0.25,
+        blunder: 0.4,
+      }).category,
+    ).toBe("Inaccuracy");
+    before.variations[0].pv = [];
+    expect(evaluateMoveQuality(move, "white", before, after)).toEqual({
+      category: null,
+      candidate: null,
+    });
   });
   it("不使用其他局面或空评价的引擎结果", async () => {
     const move = moveFor("white");
@@ -118,6 +181,7 @@ describe("复盘双方招法等级", () => {
     startMoveQualityAnalysis(move, t.after, t.changed, t.engineApi);
     await flush();
     expect(t.changes.at(-1)?.candidate).toBeNull();
+    expect(t.changes.at(-1)?.category).toBeNull();
   });
   it("切换招法只取消自身请求，迟到的结果不能覆盖当前标记", async () => {
     const move = moveFor("white");

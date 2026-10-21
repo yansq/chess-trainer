@@ -1,21 +1,35 @@
 import { api, type EngineAnalysis } from "../../shared/api";
 import type { Move } from "../../shared/types";
-import { classifyMove, type Candidate } from "./blunders";
+import { evaluateMoveQuality, type Candidate, type Category } from "./blunders";
 
 export const qualityBadges = {
+  Good: {
+    symbol: "✓",
+    label: "好棋",
+    color: "bg-quality-good text-quality-ink",
+  },
   Inaccuracy: {
     symbol: "?!",
     label: "不精确",
-    color: "bg-yellow-400 text-yellow-950",
+    color: "bg-quality-inaccuracy text-quality-inaccuracy-ink",
   },
-  Mistake: { symbol: "?", label: "错误", color: "bg-orange-500 text-white" },
-  Blunder: { symbol: "??", label: "严重失误", color: "bg-red-600 text-white" },
+  Mistake: {
+    symbol: "?",
+    label: "错误",
+    color: "bg-quality-mistake text-quality-ink",
+  },
+  Blunder: {
+    symbol: "??",
+    label: "严重失误",
+    color: "bg-quality-blunder text-quality-ink",
+  },
 } as const;
 
 export interface MoveQuality {
   moveId: string;
   fen: string;
   candidate: Candidate | null;
+  category: Category | "Good" | null;
   status: string;
 }
 
@@ -33,9 +47,18 @@ export function startMoveQualityAnalysis(
   let active = true;
   let pending = false;
   const requestId = crypto.randomUUID();
-  const report = (candidate: Candidate | null, status: string) => {
+  const report = (
+    rating: Pick<MoveQuality, "candidate" | "category"> | null,
+    status: string,
+  ) => {
     if (active)
-      onChange({ moveId: move.id, fen: move.fenAfter, candidate, status });
+      onChange({
+        moveId: move.id,
+        fen: move.fenAfter,
+        candidate: rating?.candidate ?? null,
+        category: rating?.category ?? null,
+        status,
+      });
   };
   report(null, "评估招法…");
   void (async () => {
@@ -73,7 +96,7 @@ export function startMoveQualityAnalysis(
       }
       const side = move.fenBefore.split(" ")[1] === "w" ? "white" : "black";
       report(
-        classifyMove(move, side, before, after, {
+        evaluateMoveQuality(move, side, before, after, {
           inaccuracy: Number(inaccuracy ?? 0.12),
           mistake: Number(mistake ?? 0.25),
           blunder: Number(blunder ?? 0.4),

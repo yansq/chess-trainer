@@ -107,22 +107,22 @@ export default function SettingsPage() {
 
   return (
     <>
-      <div className="page-head mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-[14px] [&_p]:text-[#8d9e9b]">
+      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
         <div>
-          <div className="eyebrow text-[10px] font-[750] tracking-[0.2em] text-[#81ad94]">
+          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             PREFERENCES
           </div>
           <h1>设置</h1>
         </div>
       </div>
       {message && (
-        <div className="notice mb-[18px] rounded-lg border border-[#456457] bg-[#22392e] px-[15px] py-3 text-[13px] text-[#cce9d4]">
+        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
           {message}
         </div>
       )}
       <SoundSettings />
-      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
-        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
+        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           Lichess 账户
         </div>
         <label>
@@ -142,7 +142,7 @@ export default function SettingsPage() {
             placeholder="输入 Lichess Token"
           />
         </label>
-        <div className="settings-actions mt-[18px] flex gap-2.5">
+        <div className="mt-4.5 flex gap-2.5">
           <button
             disabled={busy || !username.trim()}
             onClick={() => void saveUsername()}
@@ -150,14 +150,14 @@ export default function SettingsPage() {
             保存用户名
           </button>
           <button
-            className="secondary border-control-edge bg-secondary text-secondary-ink"
+            className="border-control-edge bg-secondary text-secondary-ink"
             disabled={busy || !username.trim()}
             onClick={() => void testConnection()}
           >
             测试连接
           </button>
           <button
-            className="secondary border-control-edge bg-secondary text-secondary-ink"
+            className="border-control-edge bg-secondary text-secondary-ink"
             disabled={busy || !username.trim() || !token}
             onClick={() => void saveToken()}
           >
@@ -165,8 +165,8 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
-      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
-        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
+        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           Stockfish
         </div>
         <label>
@@ -187,12 +187,12 @@ export default function SettingsPage() {
             onChange={(e) => setDepth(Number(e.target.value))}
           />
         </label>
-        <div className="settings-actions mt-[18px] flex gap-2.5">
+        <div className="mt-4.5 flex gap-2.5">
           <button onClick={() => void saveEngine()}>保存引擎配置</button>
         </div>
       </div>
-      <div className="panel settings-panel rounded-xl border border-panel-edge bg-panel mb-4 max-w-[620px] px-[22px] pb-[22px] [&>.section-title]:mx-[-22px] [&>.section-title]:mb-5 [&_p]:text-[13px] [&_p]:leading-[1.6] [&_p]:text-[#93a69d] [&_label]:mt-[18px] [&_label]:grid [&_label]:gap-2 [&_label]:text-[13px]">
-        <div className="section-title border-b border-panel-edge px-[18px] py-4 text-[14px] font-bold [&_span]:ml-[7px] [&_span]:text-[12px] [&_span]:font-normal [&_span]:text-[#7d928d]">
+      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
+        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           失误分类阈值
         </div>
         {(["inaccuracy", "mistake", "blunder"] as const).map((k) => (
@@ -214,7 +214,7 @@ export default function SettingsPage() {
             />
           </label>
         ))}
-        <div className="settings-actions mt-[18px] flex gap-2.5">
+        <div className="mt-4.5 flex gap-2.5">
           <button onClick={() => void saveThresholds()}>保存阈值</button>
         </div>
       </div>
