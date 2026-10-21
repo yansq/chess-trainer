@@ -1,3 +1,4 @@
+import { Box, Button } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { api } from "../../shared/api";
@@ -47,22 +48,23 @@ export default function SourceAnnotation({ puzzle }: { puzzle: Puzzle }) {
         </p>
       )}
       {state.status === "loaded" && (
-        <div className="text-body-sm leading-annotation text-move wrap-anywhere [&_p]:my-2 [&_p]:text-inherit [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-accent-edge [&_blockquote]:pl-3 [&_a]:text-accent-ink [&_a]:underline [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:bg-field [&_pre]:p-2">
+        <Box className="text-body-sm leading-annotation text-move wrap-anywhere [&_p]:my-2 [&_p]:text-inherit [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-accent-edge [&_blockquote]:pl-3 [&_a]:text-accent-ink [&_a]:underline [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:bg-field [&_pre]:p-2">
           <ReactMarkdown>{state.content}</ReactMarkdown>
-        </div>
+        </Box>
       )}
       {state.status === "error" && (
         <>
           <p className="text-muted">来源注释暂时无法加载。</p>
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
+          <Button
+            size="1"
+            variant="soft"
             onClick={() => {
               setState({ status: "loading" });
               setRetry((value) => value + 1);
             }}
           >
             重试加载注释
-          </button>
+          </Button>
         </>
       )}
     </section>

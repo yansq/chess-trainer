@@ -1,3 +1,4 @@
+import { Box, Button, Flex } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { api } from "../../shared/api";
 import { upcomingDueDays } from "./due-forecast";
@@ -29,22 +30,29 @@ export default function DueForecast({ refreshKey }: { refreshKey: number }) {
     };
   }, [refreshKey, retry]);
   return (
-    <div
-      className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+    <Flex
+      wrap="wrap"
+      align="center"
+      mb="3"
+      className="gap-x-4 gap-y-1 text-xs"
       aria-label="未来三天到期题目"
     >
-      <span className="text-engine-muted">到期预告</span>
+      <span className="text-engine-muted">到期预告（累计）</span>
       {[1, 2, 3].map((day, index) => (
-        <div
+        <Box
           key={day}
           className="inline-flex items-center gap-1.5 whitespace-nowrap"
-          title={forecast?.dates[index]}
+          title={
+            forecast
+              ? `截至 ${forecast.dates[index]} 当天结束，包含今天及已逾期的题目`
+              : "累计到期题数，包含今天及已逾期的题目"
+          }
         >
           <span className="text-engine-muted">{day} 天后</span>
           <strong className="tabular-nums text-accent-ink">
             {error ? "—" : (forecast?.counts[index] ?? "—")} 道
           </strong>
-        </div>
+        </Box>
       ))}
       {error && (
         <span
@@ -53,15 +61,16 @@ export default function DueForecast({ refreshKey }: { refreshKey: number }) {
           title={error}
         >
           到期预告加载失败
-          <button
+          <Button
+            size="1"
+            variant="soft"
             type="button"
-            className="border-control-edge bg-secondary px-2 py-0.5 text-xs text-secondary-ink"
             onClick={() => setRetry((value) => value + 1)}
           >
             重试
-          </button>
+          </Button>
         </span>
       )}
-    </div>
+    </Flex>
   );
 }

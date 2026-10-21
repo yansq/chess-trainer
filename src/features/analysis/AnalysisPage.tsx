@@ -1,8 +1,23 @@
+import {
+  Box,
+  Button,
+  SegmentedControl,
+  Switch,
+  Text,
+  Card,
+  Flex,
+  Grid,
+  Heading,
+  IconButton,
+  TextArea,
+  TextField,
+} from "@radix-ui/themes";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
 import {
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -63,6 +78,7 @@ export default function AnalysisPage() {
   const navigateTo = useNavigate();
   const [game, setGame] = useState<Game | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [engineEnabled, setEngineEnabled] = useState(true);
   const [review, setReview] = useState(() => createReviewTree([]));
   const [selectedSquare, setSelectedSquare] = useState<{
     fen: string;
@@ -114,14 +130,30 @@ export default function AnalysisPage() {
   const gameId = game?.id;
   const gameMoves = game?.moves;
   useEffect(() => {
-    if (!gameId || !gameMoves) return;
+    if (!engineEnabled || !gameId || !gameMoves) return;
     return startGameAnalysis(
       gameMoves,
       gameMoves[0]?.fenBefore ?? new Chess().fen(),
       (result) => setGameAnalysis({ ...result, gameId }),
     );
-  }, [gameId, gameMoves, analysisRetry]);
-  const batchCancelled = useRef(false);
+  }, [gameId, gameMoves, analysisRetry, engineEnabled]);
+  const batchGeneration = useRef(0);
+  const batchRequest = useRef<string | null>(null);
+  const cancelBatch = useCallback(() => {
+    batchGeneration.current++;
+    if (batchRequest.current) {
+      void api.engineStop(batchRequest.current).catch(() => {});
+      batchRequest.current = null;
+    }
+  }, []);
+  useEffect(() => cancelBatch, [cancelBatch]);
+  function changeEngineEnabled(enabled: boolean) {
+    if (!enabled) {
+      cancelBatch();
+      setBatchProgress("已取消");
+    }
+    setEngineEnabled(enabled);
+  }
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [batchProgress, setBatchProgress] = useState("");
   useEffect(() => {
@@ -192,10 +224,12 @@ export default function AnalysisPage() {
   const lineLength = reviewLineEnd(review)?.ply ?? 0;
   const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
-  const qualities = {
-    ...preanalysis?.qualities,
-    ...(moveQualities.gameId === game?.id ? moveQualities.values : {}),
-  };
+  const qualities = engineEnabled
+    ? {
+        ...preanalysis?.qualities,
+        ...(moveQualities.gameId === game?.id ? moveQualities.values : {}),
+      }
+    : {};
   const moveQuality = currentMove ? qualities[currentMove.id] : null;
   const quality = moveQuality?.fen === fen ? moveQuality : null;
   const badge = quality?.category ? qualityBadges[quality.category] : null;
@@ -211,10 +245,19 @@ export default function AnalysisPage() {
     changeReview(navigateReview(review, direction));
   }
   useEffect(() => {
-    if (inBranch) return startPositionAnalysis(fen, setPositionAnalysis);
-  }, [fen, inBranch]);
+    if (engineEnabled && inBranch)
+      return startPositionAnalysis(fen, setPositionAnalysis);
+  }, [fen, inBranch, engineEnabled]);
   useEffect(() => {
-    if (!game || !inBranch || !currentMove || !engine || engineStatus) return;
+    if (
+      !engineEnabled ||
+      !game ||
+      !inBranch ||
+      !currentMove ||
+      !engine ||
+      engineStatus
+    )
+      return;
     return startMoveQualityAnalysis(
       { ...currentMove, gameId: game.id },
       engine,
@@ -227,7 +270,7 @@ export default function AnalysisPage() {
           },
         })),
     );
-  }, [game, inBranch, currentMove, engine, engineStatus]);
+  }, [game, inBranch, currentMove, engine, engineStatus, engineEnabled]);
   function playMove(from: string, to: string, piece?: string): boolean {
     const next = playReviewMove(review, from, to, piece);
     if (!next) return false;
@@ -292,36 +335,64 @@ export default function AnalysisPage() {
     }
   }
   async function detectBlunders() {
+    if (!engineEnabled) return;
     if (!game?.userColor) {
       setMessage(
         "无法判断你的执棋颜色。请在设置中填写与棋谱一致的用户名后重新导入。",
       );
       return;
     }
-    const path = await api.getSetting("engine_path");
-    if (!path) {
-      setMessage("请先在设置中配置 Stockfish");
-      return;
-    }
-    const depth = Number((await api.getSetting("engine_depth")) ?? 14);
-    const thresholds = {
-      inaccuracy: Number((await api.getSetting("loss_inaccuracy")) ?? 0.12),
-      mistake: Number((await api.getSetting("loss_mistake")) ?? 0.25),
-      blunder: Number((await api.getSetting("loss_blunder")) ?? 0.4),
-    };
-    batchCancelled.current = false;
+    cancelBatch();
+    const generation = batchGeneration.current;
+    const cancelled = () => generation !== batchGeneration.current;
     setCandidates([]);
-    const found: Candidate[] = [];
-    const own = game.moves.filter(
-      (m) => (m.ply % 2 === 1 ? "white" : "black") === game.userColor,
-    );
-    for (let i = 0; i < own.length; i++) {
-      if (batchCancelled.current) break;
-      setBatchProgress(`分析中 ${i + 1} / ${own.length}`);
-      try {
-        const before = await api.engineAnalyze(path, own[i].fenBefore, depth);
-        if (batchCancelled.current) break;
-        const after = await api.engineAnalyze(path, own[i].fenAfter, depth);
+    setBatchProgress("准备分析…");
+    try {
+      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all(
+        [
+          "engine_path",
+          "engine_depth",
+          "loss_inaccuracy",
+          "loss_mistake",
+          "loss_blunder",
+        ].map((key) => api.getSetting(key)),
+      );
+      if (cancelled()) return;
+      if (!path) {
+        setMessage("请先在设置中配置 Stockfish");
+        setBatchProgress("");
+        return;
+      }
+      const thresholds = {
+        inaccuracy: Number(inaccuracy ?? 0.12),
+        mistake: Number(mistake ?? 0.25),
+        blunder: Number(blunder ?? 0.4),
+      };
+      const analyze = async (position: string) => {
+        const requestId = crypto.randomUUID();
+        batchRequest.current = requestId;
+        try {
+          return await api.engineAnalyze(
+            path,
+            position,
+            Number(depth ?? 14),
+            requestId,
+          );
+        } finally {
+          if (batchRequest.current === requestId) batchRequest.current = null;
+        }
+      };
+      const found: Candidate[] = [];
+      const own = game.moves.filter(
+        (m) => (m.ply % 2 === 1 ? "white" : "black") === game.userColor,
+      );
+      for (let i = 0; i < own.length; i++) {
+        if (cancelled()) return;
+        setBatchProgress(`分析中 ${i + 1} / ${own.length}`);
+        const before = await analyze(own[i].fenBefore);
+        if (cancelled()) return;
+        const after = await analyze(own[i].fenAfter);
+        if (cancelled()) return;
         const candidate = classifyMove(
           own[i],
           game.userColor,
@@ -333,21 +404,18 @@ export default function AnalysisPage() {
           found.push(candidate);
           setCandidates([...found]);
         }
-      } catch (e) {
-        if (!batchCancelled.current) {
-          setMessage(`批量分析中断：${e}`);
-          break;
-        }
+      }
+      if (!cancelled())
+        setBatchProgress(`分析完成，发现 ${found.length} 个候选`);
+    } catch (error) {
+      if (!cancelled()) {
+        setMessage(`批量分析中断：${error}`);
+        setBatchProgress("分析中断");
       }
     }
-    setBatchProgress(
-      batchCancelled.current
-        ? "已取消"
-        : `分析完成，发现 ${found.length} 个候选`,
-    );
   }
   async function confirmCandidate(c: Candidate) {
-    if (!game) return;
+    if (!engineEnabled || !game) return;
     const puzzle: Puzzle = {
       id: `auto:${c.move.id}`,
       sourceType: "auto",
@@ -438,53 +506,83 @@ export default function AnalysisPage() {
   }
   if (!id)
     return (
-      <div className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
+      <Grid
+        px="5"
+        className="py-15 text-center text-empty min-h-70 place-items-center"
+      >
         请从「对局」列表选择一局开始复盘。
-      </div>
+      </Grid>
     );
   if (!game)
     return (
-      <div className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
+      <Grid
+        px="5"
+        className="py-15 text-center text-empty min-h-70 place-items-center"
+      >
         {message || "加载对局…"}
-      </div>
+      </Grid>
     );
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-3 shrink-0 flex items-center justify-between gap-3 [&_h1]:truncate [&_p]:truncate [&_h1]:my-1 [&_h1]:text-2xl [&>button]:shrink-0 [&>button]:px-3 [&>button]:py-2 [&>button]:text-xs [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
-        <div className="min-w-0">
-          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+    <Flex direction="column" className="h-full min-h-0">
+      <Flex
+        align="center"
+        justify="between"
+        mb="3"
+        gap="3"
+        className="shrink-0 [&_h1]:truncate [&_p]:truncate [&_h1]:my-1 [&_h1]:text-2xl [&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
+      >
+        <Box className="min-w-0">
+          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             GAME REVIEW
-          </div>
-          <h1>
+          </Box>
+          <Heading as="h1" size="5">
             {game.whitePlayer} <span className="text-muted">vs</span>{" "}
             {game.blackPlayer}
-          </h1>
+          </Heading>
           <p>
             {game.playedAt?.slice(0, 10) ?? "未知日期"} ·{" "}
             {game.userColor === "white" ? "执白" : "执黑"} ·{" "}
             {game.openingName ?? "未知开局"}
           </p>
-        </div>
-        <button
-          className="border-control-edge bg-secondary text-secondary-ink"
-          disabled={reviewBusy}
-          onClick={() => void completeOrNextGame()}
-        >
-          {game.reviewStatus ? "下一盘" : "标记复盘完成"}
-        </button>
-      </div>
-      <div className="mb-2 h-7 shrink-0" role="status" aria-live="polite">
+        </Box>
+        <Flex align="center" gap="3" className="shrink-0">
+          <Button size="1" variant="soft" onClick={() => navigateTo("/games")}>
+            <ArrowLeft size={14} />
+            返回对局列表
+          </Button>
+          <Text as="label" size="2">
+            <Flex align="center" gap="2">
+              引擎
+              <Switch
+                size="1"
+                aria-label="启用引擎分析"
+                checked={engineEnabled}
+                onCheckedChange={changeEngineEnabled}
+              />
+            </Flex>
+          </Text>
+          <Button
+            size="1"
+            variant="soft"
+            disabled={reviewBusy}
+            onClick={() => void completeOrNextGame()}
+          >
+            {game.reviewStatus ? "下一盘" : "标记复盘完成"}
+          </Button>{" "}
+        </Flex>
+      </Flex>
+      <Box className="mb-2 h-7 shrink-0" role="status" aria-live="polite">
         {message && (
-          <div className="h-full overflow-auto rounded-md border border-notice-edge bg-notice px-3 py-1 text-xs text-notice-ink">
+          <Box className="h-full overflow-auto rounded-md border border-notice-edge bg-notice px-3 py-1 text-xs text-notice-ink">
             {message}
-          </div>
+          </Box>
         )}
-      </div>
-      <div className="grid min-h-0 flex-1 grid-cols-analysis gap-4">
+      </Box>
+      <Grid gap="4" className="min-h-0 flex-1 grid-cols-analysis">
         <section className="grid min-h-0 min-w-0 grid-rows-analysis gap-3">
-          <div className="relative min-h-0 min-w-0 container-size">
-            <div className="mx-auto w-analysis-board">
-              <div className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
+          <Box className="relative min-h-0 min-w-0 container-size">
+            <Box className="mx-auto w-analysis-board">
+              <Box className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
                 <Chessboard
                   options={{
                     position: fen,
@@ -507,7 +605,7 @@ export default function AnalysisPage() {
                         }
                       : {},
                     squareRenderer: ({ square, children }) => (
-                      <div
+                      <Box
                         className={`relative h-full w-full ${selected === square ? "bg-board-selected" : ""}`}
                         title={
                           square === markedSquare && badge
@@ -526,7 +624,7 @@ export default function AnalysisPage() {
                             {badge.symbol}
                           </span>
                         )}
-                      </div>
+                      </Box>
                     ),
                     boardStyle: { borderRadius: 4 },
                     darkSquareStyle: {
@@ -537,10 +635,14 @@ export default function AnalysisPage() {
                     },
                   }}
                 />
-              </div>
+              </Box>
               {promotion?.fen === fen && (
-                <div
-                  className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-2 bg-panel p-3"
+                <Flex
+                  wrap="wrap"
+                  align="center"
+                  gap="2"
+                  p="3"
+                  className="absolute inset-x-0 bottom-0 z-10 bg-panel"
                   role="group"
                   aria-label="选择升变棋子"
                 >
@@ -553,65 +655,84 @@ export default function AnalysisPage() {
                       ["n", "马"],
                     ] as const
                   ).map(([piece, label]) => (
-                    <button
+                    <Button
+                      size="1"
+                      variant="solid"
                       key={piece}
                       onClick={() =>
                         playMove(promotion.from, promotion.to, piece)
                       }
                     >
                       {label}
-                    </button>
+                    </Button>
                   ))}
-                  <button
-                    className="border-control-edge bg-secondary text-secondary-ink"
+                  <Button
+                    size="1"
+                    variant="soft"
                     onClick={() => setPromotion(null)}
                   >
                     取消
-                  </button>
-                </div>
+                  </Button>
+                </Flex>
               )}
-              <div className="flex items-center justify-center gap-1 rounded-b-nav border border-panel-edge bg-panel px-2 py-1.5 [&_span]:min-w-12 [&_span]:text-center [&_span]:text-body-sm [&_span]:text-coordinate">
-                <button
-                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
+              <Flex
+                align="center"
+                justify="center"
+                gap="1"
+                px="2"
+                className="rounded-b-nav border border-panel-edge bg-panel py-1.5 [&_span]:min-w-12 [&_span]:text-center [&_span]:text-body-sm [&_span]:text-coordinate"
+              >
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => navigate("start")}
                   aria-label="回到开局"
                 >
                   <ChevronsLeft />
-                </button>
-                <button
-                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
+                </IconButton>
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => navigate("back")}
                   aria-label="上一步"
                 >
                   <ChevronLeft />
-                </button>
+                </IconButton>
                 <span>
                   {inBranch ? "分支 · " : ""}
                   {ply} / {lineLength}
                 </span>
-                <button
-                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => navigate("next")}
                   aria-label="下一步"
                 >
                   <ChevronRight />
-                </button>
-                <button
-                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
+                </IconButton>
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => navigate("end")}
                   aria-label="跳到终局"
                 >
                   <ChevronsRight />
-                </button>
-                <button
-                  className="border-none border-current bg-transparent p-1 text-fen [&_svg]:size-4"
+                </IconButton>
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => setFlipped((v) => !v)}
                   aria-label="翻转棋盘"
                 >
                   <RotateCcw />
-                </button>
-              </div>
-              <div className="mt-2 flex items-center justify-end gap-2">
+                </IconButton>
+              </Flex>
+              <Flex align="center" justify="end" mt="2" gap="2">
                 {quality?.status && (
                   <span
                     role="status"
@@ -621,8 +742,10 @@ export default function AnalysisPage() {
                     {quality.status}
                   </span>
                 )}
-                <button
-                  className="border-control-edge bg-secondary text-secondary-ink min-w-22.5 shrink-0 px-2 py-1.5 text-caption"
+                <Button
+                  size="1"
+                  variant="soft"
+                  className="min-w-22.5 shrink-0"
                   onClick={() => void copyFen()}
                   aria-label="复制当前局面 FEN"
                 >
@@ -630,11 +753,11 @@ export default function AnalysisPage() {
                   <span aria-live="polite">
                     {copiedFen === fen ? "已复制" : "复制 FEN"}
                   </span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="min-h-0">
+                </Button>
+              </Flex>
+            </Box>
+          </Box>
+          <Box className="min-h-0">
             <NotePanel
               key={noteKey}
               gameId={game.id}
@@ -654,110 +777,117 @@ export default function AnalysisPage() {
               }}
               onError={setMessage}
             />
-          </div>
+          </Box>
         </section>
         <section className="flex min-h-0 min-w-0 flex-col gap-3">
-          <div
-            className="grid shrink-0 grid-cols-3 gap-1 rounded-xl border border-panel-edge bg-panel p-1"
-            aria-label="复盘工具"
-          >
-            {(
-              [
-                ["position", "局面与招法"],
-                ["batch", "整局分析"],
-                ["puzzle", "创建题目"],
-              ] as const
-            ).map(([tool, label]) => (
-              <button
-                key={tool}
-                aria-pressed={activeTool === tool}
-                className={`border-0 px-2 py-2 text-xs ${activeTool === tool ? "bg-selected text-selected-ink" : "bg-transparent text-muted"}`}
-                onClick={() =>
-                  tool === "puzzle"
-                    ? void openPuzzleForm()
-                    : setActiveTool(tool)
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div
-            className={
-              activeTool === "position"
-                ? "flex min-h-0 flex-1 flex-col gap-3"
-                : "hidden"
+          <SegmentedControl.Root
+            value={activeTool}
+            onValueChange={(tool) =>
+              tool === "puzzle"
+                ? void openPuzzleForm()
+                : setActiveTool(tool as "position" | "batch")
             }
+            aria-label="复盘工具"
+            className="shrink-0"
           >
-            <div className="shrink-0 overflow-hidden rounded-xl border border-panel-edge bg-panel">
-              <div className="section-title border-b border-panel-edge px-3 py-2.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
-                Stockfish 分析{" "}
-                <span>
-                  {engineStatus && engine ? ` · ${engineStatus}` : ""}
-                </span>
-              </div>
-              <div className="h-47 overflow-auto overscroll-contain p-1.5 text-body-sm">
-                {engine && engine.fen === fen ? (
-                  <ol
-                    className="m-0 w-full list-none p-0 divide-y divide-control-edge"
-                    aria-label="推荐招法"
-                  >
-                    {engine.variations.slice(0, 3).map((variation) => {
-                      const sanLine = uciLineToSan(engine.fen, variation.pv);
-                      const uci = variation.pv[0];
-                      return (
-                        <li key={variation.rank}>
-                          <button
-                            type="button"
-                            className="block w-full rounded-md border border-transparent bg-transparent px-2 py-2 text-left whitespace-normal text-inherit font-inherit enabled:hover:border-candidate-edge enabled:hover:bg-candidate-hover enabled:hover:filter-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent-ink focus-visible:outline-offset-2"
-                            aria-label={`走推荐 ${variation.rank}：${sanLine[0] ?? "无可用招法"}`}
-                            title={
-                              sanLine[0]
-                                ? `在棋盘上走 ${sanLine[0]}`
-                                : undefined
-                            }
-                            disabled={!sanLine.length}
-                            onClick={() =>
-                              playMove(uci.slice(0, 2), uci.slice(2, 4), uci[4])
-                            }
-                          >
-                            <div className="mb-1 flex items-center gap-3">
-                              <div>
-                                {variation.rank} · {sanLine[0] ?? "—"}
-                              </div>
-                              <strong className="tabular-nums text-accent-ink">
-                                {variation.scoreType === "mate"
-                                  ? `M${variation.scoreValue}`
-                                  : (variation.scoreValue / 100).toFixed(2)}
-                              </strong>
-                              <span className="ml-auto text-caption text-engine-muted">
-                                深度 {variation.depth}
-                              </span>
-                            </div>
-                            <small
-                              className="block truncate font-chess-mono text-caption font-normal text-engine-muted"
-                              title={sanLine.join(" ")}
-                            >
-                              {sanLine.join(" ")}
-                            </small>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                ) : (
-                  <span className="block px-2 py-3 text-muted">
-                    {engineStatus || "请在设置中配置 Stockfish 路径"}
+            <SegmentedControl.Item value="position">
+              局面与招法
+            </SegmentedControl.Item>
+            <SegmentedControl.Item value="batch">
+              整局分析
+            </SegmentedControl.Item>
+            <SegmentedControl.Item value="puzzle">
+              创建题目
+            </SegmentedControl.Item>
+          </SegmentedControl.Root>
+          <Flex
+            direction="column"
+            gap="3"
+            className={activeTool === "position" ? "min-h-0 flex-1" : "hidden"}
+          >
+            {engineEnabled && (
+              <Card className="shrink-0 overflow-hidden p-0">
+                <Box
+                  px="3"
+                  py="2"
+                  className="border-b border-panel-edge text-body-sm font-bold"
+                >
+                  Stockfish 分析{" "}
+                  <span className="text-xs font-normal text-engine-muted">
+                    {engineStatus && engine ? ` · ${engineStatus}` : ""}
                   </span>
-                )}
-              </div>
-            </div>
+                </Box>
+                <Box
+                  p="2"
+                  className="h-47 overflow-auto overscroll-contain text-body-sm"
+                >
+                  {engine && engine.fen === fen ? (
+                    <ol
+                      className="m-0 w-full list-none divide-y divide-control-edge p-0"
+                      aria-label="推荐招法"
+                    >
+                      {engine.variations.slice(0, 3).map((variation) => {
+                        const sanLine = uciLineToSan(engine.fen, variation.pv);
+                        const uci = variation.pv[0];
+                        return (
+                          <li key={variation.rank}>
+                            <Button
+                              size="1"
+                              variant="ghost"
+                              className="m-0 box-border h-auto w-full min-w-0 flex-col items-stretch gap-1 p-2 text-left whitespace-normal"
+                              aria-label={`走推荐 ${variation.rank}：${sanLine[0] ?? "无可用招法"}`}
+                              title={
+                                sanLine[0]
+                                  ? `在棋盘上走 ${sanLine[0]}`
+                                  : undefined
+                              }
+                              disabled={!sanLine.length}
+                              onClick={() =>
+                                playMove(
+                                  uci.slice(0, 2),
+                                  uci.slice(2, 4),
+                                  uci[4],
+                                )
+                              }
+                            >
+                              <Flex align="center" gap="3" className="min-w-0">
+                                <Box>
+                                  {variation.rank} · {sanLine[0] ?? "—"}
+                                </Box>
+                                <strong className="tabular-nums text-accent-ink">
+                                  {variation.scoreType === "mate"
+                                    ? `M${variation.scoreValue}`
+                                    : (variation.scoreValue / 100).toFixed(2)}
+                                </strong>
+                                <span className="ml-auto shrink-0 text-caption text-engine-muted">
+                                  深度 {variation.depth}
+                                </span>
+                              </Flex>
+                              <small
+                                className="block truncate font-chess-mono text-caption font-normal text-engine-muted"
+                                title={sanLine.join(" ")}
+                              >
+                                {sanLine.join(" ")}
+                              </small>
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : (
+                    <span className="block px-2 py-3 text-muted">
+                      {engineStatus || "请在设置中配置 Stockfish 路径"}
+                    </span>
+                  )}
+                </Box>
+              </Card>
+            )}
             <MoveList
               tree={review}
               qualities={qualities}
-              analysisStatus={preanalysis?.status}
+              analysisStatus={engineEnabled ? preanalysis?.status : undefined}
               onRetry={
-                preanalysis?.failed
+                engineEnabled && preanalysis?.failed
                   ? () => setAnalysisRetry((value) => value + 1)
                   : undefined
               }
@@ -766,104 +896,143 @@ export default function AnalysisPage() {
               }
               onMainline={() => changeReview(returnToMainline(review))}
             />
-          </div>
-          <div
+          </Flex>
+          <Card
             className={
               activeTool === "batch"
-                ? "  flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel"
+                ? "flex min-h-0 flex-1 flex-col overflow-hidden p-0"
                 : "hidden"
             }
           >
-            <div className="shrink-0 border-b border-panel-edge px-3 py-2.5 text-body-sm font-bold">
-              整局失误分析
-              {candidates.length > 0 && ` · ${candidates.length} 个候选`}
-              {batchProgress && (
-                <span className="ml-2 text-xs font-normal text-engine-muted">
-                  {batchProgress}
-                </span>
-              )}
-            </div>
-            <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-candidate-ink [&_button]:px-2.25 [&_button]:py-1.5 [&_button]:text-xs">
-              <button
-                className="border-control-edge bg-secondary text-secondary-ink"
-                onClick={() => void detectBlunders()}
-              >
-                分析整局失误
-              </button>
-              <button
-                className="border-control-edge bg-secondary text-secondary-ink"
-                onClick={() => {
-                  batchCancelled.current = true;
-                  void api.engineStop();
-                }}
-              >
-                停止
-              </button>
-              <span>{batchProgress}</span>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-              {!candidates.length && (
-                <p className="px-4 text-body-sm text-muted">
-                  分析己方招法，确认失误后可直接加入题库。
-                </p>
-              )}
-              {candidates.map((c) => (
-                <div
-                  className="candidate flex flex-wrap items-center justify-between gap-2 border-t border-panel-edge px-4 py-3 text-xs text-candidate-ink [&_button]:px-2.25 [&_button]:py-1.5 [&_button]:text-xs"
-                  key={c.move.id}
+            {!engineEnabled ? (
+              <Text size="2" color="gray" as="p" m="4">
+                引擎已关闭，开启后可分析整局。
+              </Text>
+            ) : (
+              <>
+                <Box
+                  px="3"
+                  py="2"
+                  className="shrink-0 border-b border-panel-edge text-body-sm font-bold"
                 >
-                  <span>
-                    {c.category} · {Math.ceil(c.move.ply / 2)}
-                    {c.move.ply % 2 ? "．" : "…"} {c.move.san} · 胜率损失{" "}
-                    {(c.loss * 100).toFixed(0)}%
-                  </span>
-                  <button onClick={() => void confirmCandidate(c)}>
-                    确认入题
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+                  整局失误分析{" "}
+                  {candidates.length > 0 && ` · ${candidates.length} 个候选`}
+                  {batchProgress && (
+                    <span className="ml-2 text-xs font-normal text-engine-muted">
+                      {batchProgress}
+                    </span>
+                  )}
+                </Box>
+                <Flex
+                  wrap="wrap"
+                  align="center"
+                  gap="2"
+                  px="4"
+                  py="3"
+                  className="shrink-0 text-xs text-candidate-ink"
+                >
+                  <Button
+                    size="1"
+                    variant="soft"
+                    onClick={() => void detectBlunders()}
+                  >
+                    分析整局失误
+                  </Button>
+                  <Button
+                    size="1"
+                    variant="soft"
+                    onClick={() => {
+                      cancelBatch();
+                      setBatchProgress("已取消");
+                    }}
+                  >
+                    停止
+                  </Button>
+                  <span>{batchProgress}</span>
+                </Flex>
+                <Box className="min-h-0 flex-1 overflow-auto overscroll-contain">
+                  {!candidates.length && (
+                    <p className="px-4 text-body-sm text-muted">
+                      分析己方招法，确认失误后可直接加入题库。
+                    </p>
+                  )}
+                  {candidates.map((c) => (
+                    <Flex
+                      wrap="wrap"
+                      align="center"
+                      justify="between"
+                      gap="2"
+                      px="4"
+                      py="3"
+                      key={c.move.id}
+                      className="border-t border-panel-edge text-xs text-candidate-ink"
+                    >
+                      <span>
+                        {c.category} · {Math.ceil(c.move.ply / 2)}
+                        {c.move.ply % 2 ? "．" : "…"} {c.move.san} · 胜率损失{" "}
+                        {(c.loss * 100).toFixed(0)}%
+                      </span>
+                      <Button size="1" onClick={() => void confirmCandidate(c)}>
+                        确认入题
+                      </Button>
+                    </Flex>
+                  ))}
+                </Box>
+              </>
+            )}
+          </Card>
           {showPuzzle && (
-            <div
-              className={`${activeTool === "puzzle" ? "flex" : "hidden"} min-h-0 flex-1 flex-col   overflow-hidden rounded-xl border border-panel-edge bg-panel [&_textarea]:mx-3 [&_textarea]:my-1.5 [&_textarea]:w-editor-field [&_textarea]:resize-none [&_input]:mx-3 [&_input]:my-1.5 [&_input]:w-editor-field [&_input]:py-2 [&_input]:text-body-sm [&_textarea]:py-2 [&_textarea]:text-body-sm [&_p]:mx-3 [&_p]:my-2 [&_p]:text-xs [&_p]:text-help`}
+            <Card
+              className={
+                activeTool === "puzzle"
+                  ? "flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+                  : "hidden"
+              }
             >
-              <div className="section-title shrink-0 border-b border-panel-edge px-3 py-2.5 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+              <Box
+                px="3"
+                py="2"
+                className="shrink-0 border-b border-panel-edge text-sm font-bold"
+              >
                 创建训练题目
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-                <p>
+              </Box>
+              <Flex
+                direction="column"
+                gap="3"
+                p="3"
+                className="min-h-0 flex-1 overflow-auto overscroll-contain"
+              >
+                <p className="m-0 text-xs text-help">
                   出题起点由
                   {puzzleOrigin?.fen.split(" ")[1] === "w" ? "白方" : "黑方"}
                   走棋。在棋盘上走棋会自动填入后续招法，退回或改走时同步更新；也可手动填写。
                 </p>
-                <div className="mx-3 mb-2 grid gap-2">
-                  <div className="grid gap-1">
-                    <span className="text-body-sm text-engine-muted">
-                      题目分类
-                    </span>
-                    <Select<PuzzleCategory>
-                      label="题目分类"
-                      value={puzzleCategory}
-                      options={PUZZLE_CATEGORIES}
-                      onValueChange={(category) =>
-                        void changePuzzleCategory(category)
-                      }
-                    />
-                  </div>
-                </div>
-                <input
+                <Grid gap="1">
+                  <span className="text-body-sm text-engine-muted">
+                    题目分类
+                  </span>
+                  <Select<PuzzleCategory>
+                    label="题目分类"
+                    value={puzzleCategory}
+                    options={PUZZLE_CATEGORIES}
+                    onValueChange={(category) =>
+                      void changePuzzleCategory(category)
+                    }
+                  />
+                </Grid>
+
+                <TextField.Root
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="题目标题"
                 />
-                <textarea
+                <TextArea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="题目说明"
                   rows={2}
                 />
-                <input
+                <TextField.Root
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
@@ -872,14 +1041,25 @@ export default function AnalysisPage() {
                   onChange={(e) => setAnswers(e.target.value)}
                   placeholder="连续走法，如 e4 e5 Nf3 或 e2e4 e7e5 g1f3"
                 />
-              </div>
-              <div className="flex shrink-0 justify-end gap-2.25 border-t border-panel-edge px-4 py-3">
-                <button onClick={() => void createPuzzle()}>保存题目</button>
-              </div>
-            </div>
+              </Flex>
+              <Flex
+                justify="end"
+                px="4"
+                py="3"
+                className="shrink-0 gap-2.25 border-t border-panel-edge"
+              >
+                <Button
+                  size="1"
+                  variant="solid"
+                  onClick={() => void createPuzzle()}
+                >
+                  保存题目
+                </Button>
+              </Flex>
+            </Card>
           )}
         </section>
-      </div>
-    </div>
+      </Grid>
+    </Flex>
   );
 }

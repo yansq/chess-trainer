@@ -1,7 +1,7 @@
 {
   "name": "chess-trainer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,11 +9,14 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:prepare": "node scripts/prepare-release.mjs"
   },
   "dependencies": {
-    "@radix-ui/react-select": "^2.4.1",
+    "@radix-ui/themes": "^3.3.0",
     "@tauri-apps/api": "^2.12.3",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "chess.js": "^1.4.0",
     "lucide-react": "^1.57.0",
     "react": "^19.3.0",
@@ -21,7 +24,6 @@
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^3.10.1",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { Box, Button, Card, Flex, Grid } from "@radix-ui/themes";
 import { Fragment, useEffect, useRef } from "react";
 import { moveNumber, type ReviewMove, type ReviewTree } from "./review-tree";
 
@@ -52,9 +53,14 @@ export default function MoveList({
         : null;
     const badge = category ? qualityBadges[category] : null;
     return (
-      <button
+      <Button
+        size="1"
+        variant={tree.currentId === move.id ? "soft" : "ghost"}
+        color="gray"
         ref={tree.currentId === move.id ? selectedRef : undefined}
-        className={`border-none border-current justify-start font-medium ${compact ? " inline-flex gap-0.75 rounded px-1 py-0.5 text-inherit-size leading-compact align-baseline" : "px-2 py-1.5 text-body-sm"} ${tree.currentId === move.id ? " bg-selected text-selected-ink" : "bg-transparent text-move"}`}
+        className={
+          compact ? "inline-flex h-auto gap-1 align-baseline" : "justify-start"
+        }
         onClick={() => onSelect(move.id)}
         aria-label={`${move.sourceMoveId ? "主线" : "分支"} ${moveNumber(move)} ${move.san}`}
         aria-current={tree.currentId === move.id ? "step" : undefined}
@@ -77,7 +83,7 @@ export default function MoveList({
             {badge.symbol}
           </span>
         )}
-      </button>
+      </Button>
     );
   }
   function variation(first: ReviewMove) {
@@ -126,11 +132,11 @@ export default function MoveList({
           {button(white)}
           {button(black)}
           {branches.length > 0 && (
-            <div className="col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer">
+            <Box className="col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer">
               {branches.map((branch) => (
                 <Fragment key={branch.id}>{variation(branch)} </Fragment>
               ))}
-            </div>
+            </Box>
           )}
         </Fragment>,
       );
@@ -138,61 +144,73 @@ export default function MoveList({
       move = children.get(last.id)?.[0];
       if (last.sourceMoveId && move?.sourceMoveId === null) {
         rows.push(
-          <div
+          <Box
             className="col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer"
             key={move.id}
           >
             {variation(move)}
-          </div>,
+          </Box>,
         );
         break;
       }
     }
-    return <div className="grid grid-cols-2 gap-1">{rows}</div>;
+    return (
+      <Grid gap="1" className="grid-cols-2">
+        {rows}
+      </Grid>
+    );
   }
   const first = children.get(null)?.[0];
   const hasBranches = tree.moves.some((move) => move.sourceMoveId === null);
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-panel-edge bg-panel">
-      <div className="section-title shrink-0 border-b border-panel-edge px-3 py-2.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink flex items-center justify-between gap-2 [&_button]:px-2.25 [&_button]:py-1.25 [&_button]:text-caption">
-        <div className="min-w-0 truncate" title={analysisStatus}>
+    <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+      <Flex
+        align="center"
+        justify="between"
+        px="3"
+        gap="2"
+        className="section-title shrink-0 border-b border-panel-edge py-2.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink"
+      >
+        <Box className="min-w-0 truncate" title={analysisStatus}>
           招法{" "}
           <span
             title={hasBranches ? "试走分支仅在当前复盘页面保留" : undefined}
           >
             {analysisStatus ?? (hasBranches ? "主线与试走分支" : "主线")}
           </span>
-        </div>
+        </Box>
         {onRetry && (
-          <button
-            className="shrink-0 border-control-edge bg-secondary text-secondary-ink"
+          <Button
+            size="1"
+            variant="soft"
+            className="shrink-0"
             onClick={onRetry}
           >
             重试
-          </button>
+          </Button>
         )}
         {hasBranches && (
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
-            onClick={onMainline}
-          >
+          <Button size="1" variant="soft" onClick={onMainline}>
             返回主线
-          </button>
+          </Button>
         )}
-      </div>
-      <div
+      </Flex>
+      <Box
         className="relative min-h-0 flex-1 overflow-auto overscroll-contain p-2"
         ref={listRef}
       >
-        <button
+        <Button
+          size="1"
+          variant={tree.currentId === null ? "soft" : "ghost"}
+          color="gray"
           ref={tree.currentId === null ? selectedRef : undefined}
-          className={` mb-1 w-full justify-start border-none border-current px-2 py-1.5 text-body-sm font-medium ${tree.currentId === null ? " bg-selected text-selected-ink" : "bg-transparent text-move"}`}
+          className="mb-1 w-full justify-start"
           onClick={() => onSelect(null)}
         >
           初始局面
-        </button>
+        </Button>
         {first && line(first)}
-      </div>
-    </div>
+      </Box>
+    </Card>
   );
 }

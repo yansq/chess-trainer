@@ -9,7 +9,7 @@ describe("未来三天到期日期", () => {
   ])("从本地日期生成完整三天范围 %s", (now, dates) => {
     const result = upcomingDueDays(now);
     expect(result.dates).toEqual(dates);
-    expect(result.boundaries).toHaveLength(4);
+    expect(result.boundaries).toHaveLength(3);
     result.boundaries.forEach((value, index) => {
       const day = new Date(value);
       expect(day.getHours()).toBe(0);
@@ -17,7 +17,7 @@ describe("未来三天到期日期", () => {
         new Date(
           now.getFullYear(),
           now.getMonth(),
-          now.getDate() + index + 1,
+          now.getDate() + index + 2,
         ).getTime(),
       );
     });
@@ -26,8 +26,8 @@ describe("未来三天到期日期", () => {
     const previous = process.env.TZ;
     try {
       process.env.TZ = "America/New_York";
-      const result = upcomingDueDays(new Date(2026, 2, 7, 12));
-      expect(result.dates).toEqual(["2026-03-08", "2026-03-09", "2026-03-10"]);
+      const result = upcomingDueDays(new Date(2026, 2, 6, 12));
+      expect(result.dates).toEqual(["2026-03-07", "2026-03-08", "2026-03-09"]);
       expect(
         new Date(result.boundaries[1]).getTime() -
           new Date(result.boundaries[0]).getTime(),

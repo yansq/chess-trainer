@@ -6,6 +6,7 @@ import { plugin as shadcn } from "@shadcn/lint";
 export default tseslint.config(
   { ignores: ["src-tauri/target/**", "dist/**"] },
   js.configs.recommended,
+  { files: ["scripts/**/*.mjs"], languageOptions: { globals: globals.node } },
   ...tseslint.configs.recommended,
   {
     files: ["src/**/*.{ts,tsx}", "tests/**/*.ts"],

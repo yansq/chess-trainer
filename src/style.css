@@ -1,4 +1,6 @@
+@layer theme, base, radix, components, utilities;
 @import "tailwindcss";
+@import "@radix-ui/themes/styles.css" layer(radix);
 @source "./";
 
 @theme static {
@@ -27,9 +29,6 @@
   --color-board-dark: #65847d;
   --color-board-light: #e8dfca;
   --color-board-selected: #b6a45f;
-  --color-chart-grid: #28333a;
-  --color-chart-axis: #81918f;
-  --color-chart-bar: #81aa91;
 
   /* Shared application roles. */
   --color-sidebar-edge: #283739;
@@ -124,46 +123,6 @@
   #root {
     @apply h-full overflow-hidden overscroll-none;
   }
-  button,
-  input,
-  textarea {
-    @apply [font:inherit];
-  }
-  button {
-    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-3.5 py-2.25 font-control whitespace-nowrap text-accent-dark;
-  }
-  button:hover {
-    @apply brightness-112;
-  }
-  button:disabled {
-    @apply cursor-not-allowed opacity-45;
-  }
-  input,
-  textarea {
-    @apply rounded-control border border-field-edge bg-field px-3 py-2.5 text-app outline-none;
-  }
-  input:focus,
-  textarea:focus {
-    @apply border-focus shadow-focus;
-  }
-  textarea {
-    @apply w-full resize-y;
-  }
-  h1 {
-    @apply my-2 text-page-title leading-heading tracking-heading;
-  }
-  table {
-    @apply w-full border-collapse text-body-sm;
-  }
-  th {
-    @apply bg-table-head px-4.5 py-3 text-left text-caption font-control text-table-caption;
-  }
-  td {
-    @apply border-t border-table-edge px-4.5 py-3.5 text-table-ink;
-  }
-  tbody tr {
-    @apply cursor-pointer hover:bg-table-hover;
-  }
 }
 
 /* Layout and third-party component contracts shared by the application. */
@@ -208,16 +167,8 @@
   font-size: clamp(11px, 1.2vw, 15px);
 }
 
-@utility w-editor-field {
-  width: calc(100% - 24px);
-}
-
 @utility w-note-field {
   width: calc(100% - 12px);
-}
-
-@utility font-inherit {
-  font: inherit;
 }
 
 @utility text-inherit-size {
@@ -240,39 +191,21 @@
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
 }
 
-@utility w-toggle-thumb {
-  width: calc((100% - 8px) / 2);
-}
-
-@utility rounded-inherit {
-  border-radius: inherit;
-}
-
-@utility content-empty {
-  --tw-content: "";
-  content: var(--tw-content);
-}
-
-@utility min-w-select {
-  min-width: var(--radix-select-trigger-width);
-}
-
-@utility max-w-select {
-  max-width: var(--radix-select-content-available-width);
-}
-
-@utility max-h-select {
-  max-height: min(320px, var(--radix-select-content-available-height));
-}
-
-@utility bg-volume {
-  background-image: linear-gradient(
-    to right,
-    var(--color-accent) var(--sound-volume),
-    var(--color-control-edge) var(--sound-volume)
-  );
-}
-
 @utility section-title {
   font-weight: 700;
+}
+
+@layer components {
+  .radix-themes {
+    --default-font-family: var(--font-sans);
+    --color-background: var(--color-canvas);
+  }
+  .rt-TableRow[data-interactive],
+  .rt-TableRow[tabindex] {
+    cursor: pointer;
+  }
+  .rt-TableRow[data-interactive]:hover,
+  .rt-TableRow[tabindex]:hover {
+    background: var(--gray-a3);
+  }
 }

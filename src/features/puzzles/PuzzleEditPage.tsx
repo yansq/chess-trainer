@@ -1,3 +1,14 @@
+import {
+  Box,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Heading,
+  IconButton,
+  TextArea,
+  TextField,
+} from "@radix-ui/themes";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
@@ -22,7 +33,6 @@ import {
   usesAnswerSequence,
 } from "./editor";
 
-const secondary = "border-control-edge bg-secondary text-secondary-ink";
 export default function PuzzleEditPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -148,49 +158,55 @@ export default function PuzzleEditPage() {
   }, [puzzle, previewLength, busy, confirmDelete]);
   if (!puzzle)
     return (
-      <div className="grid gap-4 p-4">
+      <Grid gap="4" p="4">
         <p role="status">{loading ? "加载题目中…" : message || "题目不存在"}</p>
-        <button className={secondary} onClick={() => navigate("/puzzles")}>
+        <Button size="1" variant="soft" onClick={() => navigate("/puzzles")}>
           返回题库
-        </button>
-      </div>
+        </Button>
+      </Grid>
     );
   const currentStep = Math.min(step, previewLength);
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <Flex direction="column" gap="3" className="h-full min-h-0">
       <header className="flex shrink-0 items-center justify-between gap-3">
-        <div>
-          <div className="text-eyebrow font-bold tracking-eyebrow text-accent-ink">
+        <Box>
+          <Box className="text-eyebrow font-bold tracking-eyebrow text-accent-ink">
             PUZZLE EDITOR
-          </div>
-          <h1 className="!text-editor-title">编辑题目</h1>
-        </div>
-        <button
-          className={secondary}
+          </Box>
+          <Heading as="h1" size="6" className="!text-editor-title">
+            编辑题目
+          </Heading>
+        </Box>
+        <Button
+          size="1"
+          variant="soft"
           disabled={busy}
           onClick={() => navigate("/puzzles")}
         >
           返回题库
-        </button>
+        </Button>
       </header>
-      <div
+      <Box
         className="min-h-6 shrink-0 text-body-sm text-accent-ink"
         role="status"
         aria-live="polite"
       >
         {message}
-      </div>
-      <div className="grid min-h-0 flex-1 grid-cols-puzzle gap-5">
+      </Box>
+      <Grid gap="5" className="min-h-0 flex-1 grid-cols-puzzle">
         <section
           className="flex min-h-0 min-w-0 flex-col gap-3"
           aria-label="题目棋盘预览"
         >
-          <div className="flex shrink-0 justify-between text-body-sm text-engine-muted">
+          <Flex
+            justify="between"
+            className="shrink-0 text-body-sm text-engine-muted"
+          >
             <span>{puzzle.sideToMove === "white" ? "白方" : "黑方"}走棋</span>
             <span>答案预览</span>
-          </div>
-          <div className="min-h-0 flex-1 container-size">
-            <div className="mx-auto w-puzzle-board rounded-lg border border-panel-edge bg-panel p-2">
+          </Flex>
+          <Box className="min-h-0 flex-1 container-size">
+            <Card className="mx-auto w-puzzle-board p-2">
               <Chessboard
                 options={{
                   id: "puzzle-editor-board",
@@ -205,22 +221,27 @@ export default function PuzzleEditPage() {
                   },
                 }}
               />
-            </div>
-          </div>
-          <div
-            className="flex shrink-0 flex-wrap justify-center gap-2"
+            </Card>
+          </Box>
+          <Flex
+            wrap="wrap"
+            justify="center"
+            gap="2"
+            className="shrink-0"
             aria-label="预览控制"
           >
-            <button
-              className={secondary}
+            <IconButton
+              size="1"
+              variant="soft"
               aria-label="回到题目局面"
               disabled={currentStep === 0}
               onClick={() => setStep(0)}
             >
               <ChevronsLeft size={16} />
-            </button>
-            <button
-              className={secondary}
+            </IconButton>
+            <IconButton
+              size="1"
+              variant="soft"
               aria-label="上一步"
               aria-keyshortcuts="ArrowLeft"
               title="上一步（←）"
@@ -228,12 +249,13 @@ export default function PuzzleEditPage() {
               onClick={() => setStep(currentStep - 1)}
             >
               <ChevronLeft size={16} />
-            </button>
+            </IconButton>
             <span className="flex items-center text-body-sm text-engine-muted">
               {currentStep} / {preview.sans.length}
             </span>
-            <button
-              className={secondary}
+            <IconButton
+              size="1"
+              variant="soft"
               aria-label="下一步"
               aria-keyshortcuts="ArrowRight"
               title="下一步（→）"
@@ -241,23 +263,25 @@ export default function PuzzleEditPage() {
               onClick={() => setStep(currentStep + 1)}
             >
               <ChevronRight size={16} />
-            </button>
-            <button
-              className={secondary}
+            </IconButton>
+            <IconButton
+              size="1"
+              variant="soft"
               aria-label="答案末尾"
               disabled={currentStep >= preview.sans.length}
               onClick={() => setStep(preview.sans.length)}
             >
               <ChevronsRight size={16} />
-            </button>
-            <button
-              className={secondary}
+            </IconButton>
+            <IconButton
+              size="1"
+              variant="soft"
               aria-label="翻转棋盘"
               onClick={() => setFlipped((v) => !v)}
             >
               <RotateCcw size={16} />
-            </button>
-          </div>
+            </IconButton>
+          </Flex>
           <p className="m-0 shrink-0 text-center text-xs text-engine-muted">
             使用 ← / → 方向键或按钮，逐步查看棋盘上的走法。
           </p>
@@ -276,6 +300,7 @@ export default function PuzzleEditPage() {
             <label>
               分类
               <Select<PuzzleCategory>
+                disabled={busy || confirmDelete}
                 label="编辑题目分类"
                 value={puzzle.category}
                 options={PUZZLE_CATEGORIES}
@@ -286,7 +311,7 @@ export default function PuzzleEditPage() {
             </label>
             <label>
               标题
-              <input
+              <TextField.Root
                 value={puzzle.title}
                 onChange={(e) =>
                   setPuzzle((p) => p && { ...p, title: e.target.value })
@@ -295,7 +320,7 @@ export default function PuzzleEditPage() {
             </label>
             <label>
               说明
-              <textarea
+              <TextArea
                 rows={2}
                 value={puzzle.description}
                 onChange={(e) =>
@@ -307,7 +332,7 @@ export default function PuzzleEditPage() {
               {usesAnswerSequence(puzzle)
                 ? "连续走法（双方依次走棋）"
                 : "正确招法（多个答案用逗号分隔）"}
-              <textarea
+              <TextArea
                 rows={2}
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -332,16 +357,13 @@ export default function PuzzleEditPage() {
                   : "支持 SAN 或 UCI，如 Nf3, d2d4。")}
             </p>
             {preview.alternatives.length > 1 && (
-              <div className="flex flex-wrap gap-2" aria-label="选择预览答案">
+              <Flex wrap="wrap" gap="2" aria-label="选择预览答案">
                 {preview.alternatives.map((san, index) => (
-                  <button
+                  <Button
+                    size="1"
                     type="button"
                     key={index}
-                    className={
-                      index === alternative
-                        ? "bg-selected text-selected-ink"
-                        : secondary
-                    }
+                    variant={index === alternative ? "solid" : "soft"}
                     aria-pressed={index === alternative}
                     onClick={() => {
                       setAlternative(index);
@@ -349,14 +371,14 @@ export default function PuzzleEditPage() {
                     }}
                   >
                     {san}
-                  </button>
+                  </Button>
                 ))}
-              </div>
+              </Flex>
             )}
           </fieldset>
           <footer className="shrink-0 border-t border-panel-edge p-4">
             {confirmDelete ? (
-              <div
+              <Box
                 role="alertdialog"
                 aria-modal="false"
                 aria-labelledby="delete-title"
@@ -374,53 +396,65 @@ export default function PuzzleEditPage() {
                 >
                   题目及其复习记录会一并删除，此操作无法撤销。
                 </p>
-                <div className="flex gap-2">
-                  <button
+                <Flex gap="2">
+                  <Button
+                    size="1"
+                    variant="solid"
+                    color="red"
                     type="button"
                     disabled={busy}
-                    className="border-danger-edge bg-danger text-danger-ink"
                     onClick={() => void remove()}
                   >
                     {busy ? "删除中…" : "确认删除"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="1"
+                    variant="soft"
                     ref={deleteCancel}
                     type="button"
                     disabled={busy}
-                    className={secondary}
                     onClick={cancelDelete}
                   >
                     取消删除
-                  </button>
-                </div>
-              </div>
+                  </Button>
+                </Flex>
+              </Box>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="submit" disabled={busy || !!answerError}>
+              <Flex wrap="wrap" align="center" gap="2">
+                <Button
+                  size="1"
+                  variant="solid"
+                  type="submit"
+                  disabled={busy || !!answerError}
+                >
                   {busy ? "保存中…" : "保存修改"}
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="1"
+                  variant="soft"
                   type="button"
                   disabled={busy}
-                  className={secondary}
                   onClick={() => navigate("/puzzles")}
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="1"
+                  variant="ghost"
                   ref={deleteButton}
                   type="button"
                   disabled={busy}
-                  className="ml-auto border-danger-muted bg-transparent text-danger"
+                  color="red"
+                  className="ml-auto"
                   onClick={() => setConfirmDelete(true)}
                 >
                   删除题目
-                </button>
-              </div>
+                </Button>
+              </Flex>
             )}
           </footer>
         </form>
-      </div>
-    </div>
+      </Grid>
+    </Flex>
   );
 }

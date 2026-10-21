@@ -6,3 +6,7 @@ src-tauri/target/
 *.db-*
 
 *.tsbuildinfo
+
+release/
+*.key
+*.key.pub

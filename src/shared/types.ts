@@ -81,6 +81,9 @@ export interface Puzzle {
   solutionLine: string[];
   errorCategory: string | null;
 }
+export interface PuzzleListItem extends Puzzle {
+  dueAt: string | null;
+}
 export interface Schedule {
   puzzleId: string;
   dueAt: string;

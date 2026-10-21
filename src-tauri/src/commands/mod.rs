@@ -1,5 +1,6 @@
 use crate::db::repository::{
-    self, Game, GameFilter, GamePage, OpponentType, Puzzle, ReviewInput, Schedule, SyncCheckpoint,
+    self, Game, GameFilter, GamePage, OpponentType, Puzzle, PuzzleListItem, ReviewInput, Schedule,
+    SyncCheckpoint,
 };
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -66,8 +67,8 @@ pub fn list_puzzles(
     state: State<Database>,
     due: bool,
     category: Option<String>,
-) -> Result<Vec<Puzzle>, String> {
-    repository::puzzles(&*db(&state)?, due, category.as_deref())
+) -> Result<Vec<PuzzleListItem>, String> {
+    repository::puzzle_list(&*db(&state)?, due, category.as_deref())
 }
 #[tauri::command]
 pub fn get_due_forecast(

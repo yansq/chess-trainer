@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  Callout,
+  Card,
+  Flex,
+  Heading,
+  Table,
+  TextField,
+} from "@radix-ui/themes";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
@@ -23,6 +34,7 @@ function resultLabel(result: string, color: string | null) {
   return result === color ? "胜" : "负";
 }
 export default function GamesPage() {
+  const fileInput = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
   const [filter, setFilter] = useState(initial);
   const [page, setPage] = useState<GamePage>({ items: [], total: 0 });
@@ -63,29 +75,44 @@ export default function GamesPage() {
     setFilter((f) => ({ ...f, ...patch, offset: 0 }));
   return (
     <>
-      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
-        <div>
-          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+      <Flex
+        align="center"
+        justify="between"
+        mb="7"
+        gap="5"
+        className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
+      >
+        <Box>
+          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             YOUR GAMES
-          </div>
-          <h1>对局</h1>
-        </div>
-        <div className="flex gap-2.5">
-          <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-accent-edge bg-accent px-3.5 py-2.25 font-control whitespace-nowrap text-accent-dark cursor-pointer hover:brightness-112 border-control-edge bg-secondary text-secondary-ink">
+          </Box>
+          <Heading as="h1" size="8">
+            对局
+          </Heading>
+        </Box>
+        <Flex className="gap-2.5">
+          <Button
+            variant="soft"
+            disabled={busy || sync.running}
+            onClick={() => fileInput.current?.click()}
+          >
             <Upload size={16} /> 导入 PGN
-            <input
-              hidden
-              disabled={busy || sync.running}
-              type="file"
-              accept=".pgn,.txt"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void importFile(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button
+          </Button>
+          <input
+            ref={fileInput}
+            hidden
+            disabled={busy || sync.running}
+            type="file"
+            accept=".pgn,.txt"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void importFile(f);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            size="2"
+            variant="solid"
             type="button"
             className="w-36 shrink-0"
             disabled={busy || sync.pausing}
@@ -102,23 +129,20 @@ export default function GamesPage() {
                 : sync.checkpoint?.pending
                   ? "继续同步"
                   : "同步对局"}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </Flex>
+      </Flex>
       {message && (
-        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
-          {message}
-        </div>
+        <Callout.Root size="1" className="mb-4.5">
+          <Callout.Text>{message}</Callout.Text>
+        </Callout.Root>
       )}
       {sync.message && (
-        <div
-          className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink"
-          role="status"
-        >
-          {sync.message}
-        </div>
+        <Callout.Root size="1" className="mb-4.5" role="status">
+          <Callout.Text>{sync.message}</Callout.Text>
+        </Callout.Root>
       )}
-      <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
+      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
         <OpponentTypeSelect
           value={filter.opponentType}
           onChange={(opponentType) => change({ opponentType })}
@@ -168,85 +192,98 @@ export default function GamesPage() {
             { value: "classical", label: "Classical" },
           ]}
         />
-        <input
+        <TextField.Root
           placeholder="搜索 ECO / 开局"
           value={filter.opening ?? ""}
           onChange={(e) => change({ opening: e.target.value || null })}
         />
-      </div>
-      <div className="rounded-xl border border-panel-edge bg-panel overflow-hidden">
-        <div className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+      </Card>
+      <Card className="overflow-hidden p-0">
+        <Box className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           对局记录 <span>{page.total} 局</span>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>对手</th>
-              <th>执棋</th>
-              <th>结果</th>
-              <th>开局</th>
-              <th>时限</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
+        </Box>
+        <Table.Root>
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeaderCell>日期</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>对手</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>执棋</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>结果</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>开局</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>时限</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>状态</Table.ColumnHeaderCell>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {page.items.map((g) => (
-              <tr
+              <Table.Row
+                data-interactive
                 key={g.id}
                 onClick={() => nav(`/analysis/${encodeURIComponent(g.id)}`)}
               >
-                <td>{g.playedAt?.slice(0, 10) ?? "—"}</td>
-                <td>
+                <Table.Cell>{g.playedAt?.slice(0, 10) ?? "—"}</Table.Cell>
+                <Table.Cell>
                   {g.userColor === "white" ? g.blackPlayer : g.whitePlayer}
-                </td>
-                <td>{g.userColor === "white" ? "白" : "黑"}</td>
-                <td>
-                  <span
-                    className={`result rounded-control-sm px-2 py-1 ${resultLabel(g.result, g.userColor) === "胜" ? " bg-result-win text-result-win-ink" : resultLabel(g.result, g.userColor) === "负" ? " bg-result-loss text-result-loss-ink" : "bg-result-draw text-result-draw-ink"}`}
+                </Table.Cell>
+                <Table.Cell>{g.userColor === "white" ? "白" : "黑"}</Table.Cell>
+                <Table.Cell>
+                  <Badge
+                    color={
+                      resultLabel(g.result, g.userColor) === "胜"
+                        ? "green"
+                        : resultLabel(g.result, g.userColor) === "负"
+                          ? "red"
+                          : "gray"
+                    }
                   >
                     {resultLabel(g.result, g.userColor)}
-                  </span>
-                </td>
-                <td>
+                  </Badge>
+                </Table.Cell>
+                <Table.Cell>
                   {g.eco ?? "—"} · {g.openingName ?? "未知开局"}
-                </td>
-                <td>{g.speed ?? "—"}</td>
-                <td>{g.reviewStatus ? "已复盘" : "待复盘"}</td>
-              </tr>
+                </Table.Cell>
+                <Table.Cell>{g.speed ?? "—"}</Table.Cell>
+                <Table.Cell>{g.reviewStatus ? "已复盘" : "待复盘"}</Table.Cell>
+              </Table.Row>
             ))}
-          </tbody>
-        </table>
+          </Table.Body>
+        </Table.Root>
         {page.items.length === 0 && (
-          <div className="px-5 py-15 text-center text-empty">
+          <Box className="px-5 py-15 text-center text-empty">
             当前筛选下暂无对局。可调整筛选、导入 PGN 或同步 Lichess。
-          </div>
+          </Box>
         )}
-        <div className="flex items-center justify-end gap-3.5 border-t border-panel-edge px-4.5 py-3.25 text-xs text-preview [&_button]:px-2.5 [&_button]:py-1.25">
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
+        <Flex
+          align="center"
+          justify="end"
+          className="gap-3.5 border-t border-panel-edge px-4.5 py-3.25 text-xs text-preview"
+        >
+          <Button
+            size="1"
+            variant="soft"
             disabled={filter.offset === 0}
             onClick={() =>
               setFilter((f) => ({ ...f, offset: f.offset - f.limit }))
             }
           >
             上一页
-          </button>
+          </Button>
           <span>
             {page.total ? Math.floor(filter.offset / filter.limit) + 1 : 0} /{" "}
             {Math.ceil(page.total / filter.limit)}
           </span>
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
+          <Button
+            size="1"
+            variant="soft"
             disabled={filter.offset + filter.limit >= page.total}
             onClick={() =>
               setFilter((f) => ({ ...f, offset: f.offset + f.limit }))
             }
           >
             下一页
-          </button>
-        </div>
-      </div>
+          </Button>
+        </Flex>
+      </Card>
     </>
   );
 }

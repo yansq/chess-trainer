@@ -1,6 +1,17 @@
+import {
+  Box,
+  Button,
+  Callout,
+  Card,
+  Flex,
+  Heading,
+  Text,
+  TextField,
+} from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { api } from "../../shared/api";
 import SoundSettings from "./SoundSettings";
+import UpdateSettings from "../updates/UpdateSettings";
 
 export default function SettingsPage() {
   const [username, setUsername] = useState("");
@@ -107,117 +118,135 @@ export default function SettingsPage() {
 
   return (
     <>
-      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
-        <div>
-          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+      <Flex align="center" justify="between" mb="6">
+        <Box>
+          <Text size="1" color="gray" weight="bold">
             PREFERENCES
-          </div>
-          <h1>设置</h1>
-        </div>
-      </div>
+          </Text>
+          <Heading as="h1" size="8" mt="1">
+            设置
+          </Heading>
+        </Box>
+      </Flex>
       {message && (
-        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
-          {message}
-        </div>
+        <Callout.Root size="1" mb="4">
+          <Callout.Text>{message}</Callout.Text>
+        </Callout.Root>
       )}
+      <UpdateSettings />
       <SoundSettings />
-      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
-        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
-          Lichess 账户
-        </div>
-        <label>
-          用户名
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Lichess 用户名"
-          />
-        </label>
-        <label>
-          Personal Access Token（可选）
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="输入 Lichess Token"
-          />
-        </label>
-        <div className="mt-4.5 flex gap-2.5">
-          <button
-            disabled={busy || !username.trim()}
-            onClick={() => void saveUsername()}
-          >
-            保存用户名
-          </button>
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
-            disabled={busy || !username.trim()}
-            onClick={() => void testConnection()}
-          >
-            测试连接
-          </button>
-          <button
-            className="border-control-edge bg-secondary text-secondary-ink"
-            disabled={busy || !username.trim() || !token}
-            onClick={() => void saveToken()}
-          >
-            保存 Token
-          </button>
-        </div>
-      </div>
-      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
-        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
-          Stockfish
-        </div>
-        <label>
-          可执行文件路径
-          <input
-            value={enginePath}
-            onChange={(e) => setEnginePath(e.target.value)}
-            placeholder="/opt/homebrew/bin/stockfish"
-          />
-        </label>
-        <label>
-          分析深度
-          <input
-            type="number"
-            min="4"
-            max="30"
-            value={depth}
-            onChange={(e) => setDepth(Number(e.target.value))}
-          />
-        </label>
-        <div className="mt-4.5 flex gap-2.5">
-          <button onClick={() => void saveEngine()}>保存引擎配置</button>
-        </div>
-      </div>
-      <div className="rounded-xl border border-panel-edge bg-panel mb-4 max-w-155 px-5.5 pb-5.5 [&>.section-title]:-mx-5.5 [&>.section-title]:mb-5 [&_p]:text-body-sm [&_p]:leading-copy [&_p]:text-settings-description [&_label]:mt-4.5 [&_label]:grid [&_label]:gap-2 [&_label]:text-body-sm">
-        <div className="section-title border-b border-panel-edge px-4.5 py-4 text-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
-          失误分类阈值
-        </div>
-        {(["inaccuracy", "mistake", "blunder"] as const).map((k) => (
-          <label key={k}>
-            {
-              { inaccuracy: "轻微失误", mistake: "失误", blunder: "严重失误" }[
-                k
-              ]
-            }
-            （胜率损失 %）
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={thresholds[k]}
-              onChange={(e) =>
-                setThresholds((v) => ({ ...v, [k]: Number(e.target.value) }))
-              }
-            />
-          </label>
-        ))}
-        <div className="mt-4.5 flex gap-2.5">
-          <button onClick={() => void saveThresholds()}>保存阈值</button>
-        </div>
-      </div>
+      <Card size="3" mb="4" className="max-w-155">
+        <Flex direction="column" gap="4">
+          <Heading size="4">Lichess 账户</Heading>
+          <Text size="2" as="label">
+            <Flex direction="column" gap="2">
+              用户名
+              <TextField.Root
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Lichess 用户名"
+              />
+            </Flex>
+          </Text>
+          <Text size="2" as="label">
+            <Flex direction="column" gap="2">
+              Personal Access Token（可选）
+              <TextField.Root
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="输入 Lichess Token"
+              />
+            </Flex>
+          </Text>
+          <Flex gap="2" wrap="wrap">
+            <Button
+              disabled={busy || !username.trim()}
+              onClick={() => void saveUsername()}
+            >
+              保存用户名
+            </Button>
+            <Button
+              variant="soft"
+              disabled={busy || !username.trim()}
+              onClick={() => void testConnection()}
+            >
+              测试连接
+            </Button>
+            <Button
+              variant="soft"
+              disabled={busy || !username.trim() || !token}
+              onClick={() => void saveToken()}
+            >
+              保存 Token
+            </Button>
+          </Flex>
+        </Flex>
+      </Card>
+      <Card size="3" mb="4" className="max-w-155">
+        <Flex direction="column" gap="4">
+          <Heading size="4">Stockfish</Heading>
+          <Text size="2" as="label">
+            <Flex direction="column" gap="2">
+              可执行文件路径
+              <TextField.Root
+                value={enginePath}
+                onChange={(e) => setEnginePath(e.target.value)}
+                placeholder="/opt/homebrew/bin/stockfish"
+              />
+            </Flex>
+          </Text>
+          <Text size="2" as="label">
+            <Flex direction="column" gap="2">
+              分析深度
+              <TextField.Root
+                type="number"
+                min="4"
+                max="30"
+                value={depth}
+                onChange={(e) => setDepth(Number(e.target.value))}
+              />
+            </Flex>
+          </Text>
+          <Flex>
+            <Button onClick={() => void saveEngine()}>保存引擎配置</Button>
+          </Flex>
+        </Flex>
+      </Card>
+      <Card size="3" mb="4" className="max-w-155">
+        <Flex direction="column" gap="4">
+          <Heading size="4">失误分类阈值</Heading>
+          {(["inaccuracy", "mistake", "blunder"] as const).map((k) => (
+            <Text size="2" as="label" key={k}>
+              <Flex direction="column" gap="2">
+                {
+                  {
+                    inaccuracy: "轻微失误",
+                    mistake: "失误",
+                    blunder: "严重失误",
+                  }[k]
+                }
+                （胜率损失 %）
+                <TextField.Root
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={thresholds[k]}
+                  onChange={(e) =>
+                    setThresholds((v) => ({
+                      ...v,
+                      [k]: Number(e.target.value),
+                    }))
+                  }
+                />
+              </Flex>
+            </Text>
+          ))}
+          <Flex>
+            <Button onClick={() => void saveThresholds()}>保存阈值</Button>
+          </Flex>
+        </Flex>
+      </Card>
     </>
   );
 }

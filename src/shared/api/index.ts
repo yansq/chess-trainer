@@ -6,6 +6,7 @@ import type {
   GamePage,
   Puzzle,
   PuzzleCategory,
+  PuzzleListItem,
   Schedule,
   ReviewInput,
   OpeningStat,
@@ -41,7 +42,7 @@ export const api = {
   deletePuzzle: (id: string) => invoke<void>("delete_puzzle", { id }),
   savePuzzle: (puzzle: Puzzle) => invoke<string>("save_puzzle", { puzzle }),
   listPuzzles: (due: boolean, category: PuzzleCategory | null = null) =>
-    invoke<Puzzle[]>("list_puzzles", { due, category }),
+    invoke<PuzzleListItem[]>("list_puzzles", { due, category }),
   getDueForecast: (boundaries: string[]) =>
     invoke<number[]>("get_due_forecast", { boundaries }),
   getSchedule: (id: string) => invoke<Schedule>("get_schedule", { id }),

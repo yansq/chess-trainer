@@ -1,4 +1,4 @@
-// Calendar days in the user's time zone, including month/year and DST changes.
+// Cumulative cutoffs: midnight after each target day, in the user's time zone.
 export function upcomingDueDays(now = new Date()) {
   const days = [1, 2, 3, 4].map(
     (offset) =>
@@ -11,6 +11,6 @@ export function upcomingDueDays(now = new Date()) {
         (day) =>
           `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
       ),
-    boundaries: days.map((day) => day.toISOString()),
+    boundaries: days.slice(1).map((day) => day.toISOString()),
   };
 }

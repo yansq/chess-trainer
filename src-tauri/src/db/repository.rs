@@ -89,6 +89,14 @@ pub struct Puzzle {
     pub solution_line: Vec<String>,
     pub error_category: Option<String>,
 }
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PuzzleListItem {
+    #[serde(flatten)]
+    pub puzzle: Puzzle,
+    pub due_at: Option<String>,
+}
+
 fn default_puzzle_category() -> String {
     "opening".into()
 }
@@ -409,7 +417,7 @@ fn puzzle_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Puzzle> {
         error_category: r.get(11)?,
     })
 }
-const PUZZLE_SELECT:&str="SELECT id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category,category FROM puzzles";
+const PUZZLE_SELECT:&str="SELECT id,source_type,source_game_id,source_move_id,fen,side_to_move,title,description,original_move,expected_moves,solution_line,error_category,category,(SELECT due_at FROM review_schedules WHERE puzzle_id=puzzles.id) AS due_at FROM puzzles";
 pub fn get_puzzle(db: &Connection, id: &str) -> Result<Puzzle, String> {
     db.query_row(
         &format!("{PUZZLE_SELECT} WHERE id=?1"),
@@ -430,7 +438,30 @@ pub fn delete_puzzle(db: &Connection, id: &str) -> Result<(), String> {
     }
     Ok(())
 }
+#[cfg(test)]
 pub fn puzzles(db: &Connection, due: bool, category: Option<&str>) -> Result<Vec<Puzzle>, String> {
+    query_puzzles(db, due, category, puzzle_from_row)
+}
+
+pub fn puzzle_list(
+    db: &Connection,
+    due: bool,
+    category: Option<&str>,
+) -> Result<Vec<PuzzleListItem>, String> {
+    query_puzzles(db, due, category, |row| {
+        Ok(PuzzleListItem {
+            puzzle: puzzle_from_row(row)?,
+            due_at: row.get(13)?,
+        })
+    })
+}
+
+fn query_puzzles<T>(
+    db: &Connection,
+    due: bool,
+    category: Option<&str>,
+    map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>, String> {
     if let Some(category) = category {
         puzzle_category_label(category)?;
     }
@@ -444,18 +475,19 @@ pub fn puzzles(db: &Connection, due: bool, category: Option<&str>) -> Result<Vec
     let mut s = db.prepare(&sql).map_err(err)?;
     {
         let result = s
-            .query_map([category], puzzle_from_row)
+            .query_map([category], map)
             .map_err(err)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err);
         result
     }
 }
-// Boundaries are local calendar midnights converted to UTC by the client.
+// Each exclusive cutoff is midnight after the target local calendar day.
+// Include today and overdue puzzles in every cumulative count.
 // Query all schedules, independent of the training queue's pagination limit.
 pub fn due_forecast(db: &Connection, boundaries: &[String]) -> Result<Vec<i64>, String> {
-    if boundaries.len() != 4 {
-        return Err("到期预告需要四个日期边界".into());
+    if boundaries.len() != 3 {
+        return Err("到期预告需要三个截止时间".into());
     }
     let mut dates = Vec::new();
     for boundary in boundaries {
@@ -468,12 +500,12 @@ pub fn due_forecast(db: &Connection, boundaries: &[String]) -> Result<Vec<i64>, 
         return Err("到期预告日期必须递增".into());
     }
     db.query_row(
-        "SELECT COUNT(CASE WHEN julianday(s.due_at)>=?1 AND julianday(s.due_at)<?2 THEN 1 END),
-                COUNT(CASE WHEN julianday(s.due_at)>=?2 AND julianday(s.due_at)<?3 THEN 1 END),
-                COUNT(CASE WHEN julianday(s.due_at)>=?3 AND julianday(s.due_at)<?4 THEN 1 END)
+        "SELECT COUNT(CASE WHEN julianday(s.due_at)<?1 THEN 1 END),
+                COUNT(CASE WHEN julianday(s.due_at)<?2 THEN 1 END),
+                COUNT(CASE WHEN julianday(s.due_at)<?3 THEN 1 END)
          FROM review_schedules s JOIN puzzles p ON p.id=s.puzzle_id
-         WHERE julianday(s.due_at)>=?1 AND julianday(s.due_at)<?4",
-        params![dates[0], dates[1], dates[2], dates[3]],
+         WHERE julianday(s.due_at)<?3",
+        params![dates[0], dates[1], dates[2]],
         |r| Ok(vec![r.get(0)?, r.get(1)?, r.get(2)?]),
     )
     .map_err(err)
@@ -713,11 +745,10 @@ mod tests {
         assert_eq!(get_game(&db, "lichess:abcdefgh").unwrap().moves.len(), 1)
     }
     #[test]
-    fn due_forecast_counts_local_calendar_days_without_queue_limits() {
+    fn due_forecast_counts_cumulative_deadlines_including_overdue_without_queue_limits() {
         let mut db = Connection::open_in_memory().unwrap();
         crate::db::migrations::migrate(&db).unwrap();
         let boundaries: Vec<String> = [
-            "2026-10-20T16:00:00.000Z",
             "2026-10-21T16:00:00.000Z",
             "2026-10-22T16:00:00.000Z",
             "2026-10-23T16:00:00.000Z",
@@ -754,9 +785,9 @@ mod tests {
             )
             .unwrap();
         }
-        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![72, 1, 1]);
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![74, 75, 76]);
         let mut updated = schedule(&db, "forecast-2").unwrap();
-        updated.due_at = boundaries[1].clone();
+        updated.due_at = boundaries[0].clone();
         record_review(
             &mut db,
             ReviewInput {
@@ -768,10 +799,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![71, 2, 1]);
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![73, 75, 76]);
         delete_puzzle(&db, "forecast-5").unwrap();
-        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![71, 2, 0]);
-        assert!(due_forecast(&db, &boundaries[..3]).is_err());
+        assert_eq!(due_forecast(&db, &boundaries).unwrap(), vec![73, 75, 75]);
+        assert!(due_forecast(&db, &boundaries[..2]).is_err());
         let mut invalid = boundaries.clone();
         invalid[1] = "not-a-date".into();
         assert!(due_forecast(&db, &invalid).is_err());
@@ -980,6 +1011,35 @@ mod tests {
             serde_json::from_value::<Puzzle>(legacy).unwrap().category,
             "opening"
         );
+    }
+
+    #[test]
+    fn puzzle_list_includes_current_due_time_without_changing_puzzle_payloads() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        save_puzzle(&db, named_puzzle("due-test", None, "Test")).unwrap();
+        let initial = puzzle_list(&db, false, None).unwrap();
+        assert_eq!(
+            initial[0].due_at.as_deref(),
+            Some(schedule(&db, "due-test").unwrap().due_at.as_str())
+        );
+        db.execute(
+            "UPDATE review_schedules SET due_at='2099-01-02T03:04:00Z' WHERE puzzle_id='due-test'",
+            [],
+        )
+        .unwrap();
+        let items = puzzle_list(&db, false, Some("opening")).unwrap();
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["id"], "due-test");
+        assert_eq!(json["dueAt"], "2099-01-02T03:04:00Z");
+        assert!(puzzle_list(&db, true, None).unwrap().is_empty());
+        assert!(puzzle_list(&db, false, Some("tactics")).unwrap().is_empty());
+        db.execute(
+            "DELETE FROM review_schedules WHERE puzzle_id='due-test'",
+            [],
+        )
+        .unwrap();
+        assert!(puzzle_list(&db, false, None).unwrap()[0].due_at.is_none());
     }
 
     #[test]

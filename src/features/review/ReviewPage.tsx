@@ -1,3 +1,12 @@
+import {
+  Heading,
+  Box,
+  Button,
+  Callout,
+  Card,
+  Flex,
+  Grid,
+} from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
@@ -175,31 +184,43 @@ export default function ReviewPage() {
   }
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
-        <div>
-          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+      <Flex
+        align="center"
+        justify="between"
+        mb="3"
+        gap="5"
+        className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
+      >
+        <Box>
+          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             SPACED REVIEW
-          </div>
-          <h1>今日训练</h1>
+          </Box>
+          <Heading as="h1" size="8">
+            今日训练
+          </Heading>
           <p>
             到期 {queue.length} 道 ·
             拖动棋子，或依次点击起点和终点走棋；多步题会自动走出对手应手。
           </p>
-        </div>
-      </div>
+        </Box>
+      </Flex>
       <DueForecast refreshKey={forecastRefresh} />
       {message && !current && (
-        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
-          {message}
-        </div>
+        <Callout.Root size="1" className="mb-4.5">
+          <Callout.Text>{message}</Callout.Text>
+        </Callout.Root>
       )}
       {!current ? (
-        <div className="rounded-xl border border-panel-edge bg-panel px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
+        <Card className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
           今天没有待复习的题目。你可以在复盘中继续创建题目。
-        </div>
+        </Card>
       ) : (
-        <div className="grid grid-cols-training items-start gap-6 max-[1150px]:grid-cols-training-compact max-[900px]:grid-cols-1">
-          <div className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
+        <Grid
+          align="start"
+          gap="6"
+          className="grid-cols-training max-[1150px]:grid-cols-training-compact max-[900px]:grid-cols-1"
+        >
+          <Box className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
             <Chessboard
               options={{
                 position: solutionStep > 0 ? solutionFen : fen,
@@ -226,23 +247,29 @@ export default function ReviewPage() {
                 },
               }}
             />
-          </div>
-          <div className="rounded-xl border border-panel-edge bg-panel p-7 [&_h2]:text-panel-title [&_p]:text-training-description">
-            <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+          </Box>
+          <Card className="p-7 [&_h2]:text-panel-title [&_p]:text-training-description">
+            <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
               PUZZLE {queue.length} REMAINING
-            </div>
-            <h2>{current.title}</h2>
+            </Box>
+            <Heading size="6" mt="2" mb="3">
+              {current.title}
+            </Heading>
             <p>{current.description || "找到当前局面的最佳走法。"}</p>
-            <div role="status" aria-live="polite">
+            <Box role="status" aria-live="polite">
               {message && (
-                <div className="my-4 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
-                  {message}
-                </div>
+                <Callout.Root size="1" className="my-4">
+                  <Callout.Text>{message}</Callout.Text>
+                </Callout.Root>
               )}
-            </div>
+            </Box>
             {promotion && (
-              <div
-                className="my-4 flex flex-wrap items-center gap-2"
+              <Flex
+                wrap="wrap"
+                align="center"
+                my="4"
+                gap="2"
+
                 role="group"
                 aria-label="选择升变棋子"
               >
@@ -255,20 +282,23 @@ export default function ReviewPage() {
                     ["n", "马"],
                   ] as const
                 ).map(([piece, label]) => (
-                  <button
+                  <Button
+                    size="1"
+                    variant="solid"
                     key={piece}
                     onClick={() => move(promotion.from, promotion.to, piece)}
                   >
                     {label}
-                  </button>
+                  </Button>
                 ))}
-                <button
-                  className="border-control-edge bg-secondary text-secondary-ink"
+                <Button
+                  size="1"
+                  variant="soft"
                   onClick={() => setPromotion(null)}
                 >
                   取消
-                </button>
-              </div>
+                </Button>
+              </Flex>
             )}
             {multiMove && (
               <p>
@@ -277,61 +307,57 @@ export default function ReviewPage() {
               </p>
             )}
             {!revealed && (
-              <button
-                className="mt-4 border-control-edge bg-secondary text-secondary-ink"
+              <Button
+                size="1"
+                variant="soft"
+                className="mt-4"
                 onClick={showAnswer}
               >
                 显示答案
-              </button>
+              </Button>
             )}
             {revealed && (
               <>
-                <div className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
+                <Box className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
                   <strong>{correct ? "回答正确" : "本题答案"}</strong>
-                  <div>
+                  <Box>
                     标准走法：
                     {current.expectedMoves
                       .map((uci) => uciLineToSan(current.fen, [uci])[0] ?? uci)
                       .join("、")}
-                  </div>
+                  </Box>
                   {current.solutionLine.length > 0 && (
                     <>
-                      <div>
+                      <Box>
                         {multiMove ? "完整答案" : "参考变化"}：
                         {uciLineToSan(current.fen, current.solutionLine).join(
                           " ",
                         )}
-                      </div>
-                      <button
-                        className="border-control-edge bg-secondary text-secondary-ink"
-                        onClick={advanceSolution}
-                      >
+                      </Box>
+                      <Button size="1" variant="soft" onClick={advanceSolution}>
                         播放变化 {solutionStep}/{current.solutionLine.length}
-                      </button>
+                      </Button>
                     </>
                   )}
-                </div>
+                </Box>
                 <SourceAnnotation key={current.id} puzzle={current} />
               </>
             )}
-            <div className="mt-7.5 flex flex-wrap gap-2">
+            <Flex wrap="wrap" gap="2" className="mt-7.5">
               {(["Again", "Hard", "Good", "Easy"] as const).map((r) => (
-                <button
+                <Button
+                  size="2"
+                  variant={r === "Good" ? "solid" : "soft"}
                   key={r}
                   disabled={!revealed}
-                  className={
-                    r === "Good"
-                      ? ""
-                      : " border-control-edge bg-secondary text-secondary-ink"
-                  }
                   onClick={() => void rate(r)}
                 >
                   {r}
-                </button>
+                </Button>
               ))}
-            </div>
-          </div>
-        </div>
+            </Flex>
+          </Card>
+        </Grid>
       )}
     </>
   );

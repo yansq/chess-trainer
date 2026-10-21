@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+  Box,
+  SegmentedControl,
+  Callout,
+  Card,
+  Flex,
+  Heading,
+  Grid,
+  Text,
+  Table,
+  TextField,
+} from "@radix-ui/themes";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../shared/api";
 import type { OpeningStat, OpponentType } from "../../shared/types";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
@@ -29,7 +32,16 @@ export default function StatisticsPage() {
   const rows: (OpeningFamilyStat & { eco?: string })[] =
     view === "family" ? families : stats;
   const isFamily = view === "family";
-  const total = stats.reduce((sum, stat) => sum + stat.total, 0);
+  const overall = stats.reduce(
+    (sum, stat) => ({
+      total: sum.total + stat.total,
+      wins: sum.wins + stat.wins,
+      draws: sum.draws + stat.draws,
+    }),
+    { total: 0, wins: 0, draws: 0 },
+  );
+  const { total, wins, draws } = overall;
+  const score = wins + draws * 0.5;
   useEffect(() => {
     let active = true;
     api
@@ -55,43 +67,36 @@ export default function StatisticsPage() {
   }, [color, speed, from, to, opponentType]);
   return (
     <>
-      <div className="mb-7 flex items-center justify-between gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-description">
-        <div>
-          <div className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+      <Flex
+        align="center"
+        justify="between"
+        mb="7"
+        gap="5"
+        className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
+      >
+        <Box>
+          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
             PERFORMANCE
-          </div>
-          <h1>开局统计</h1>
-        </div>
-        <button
-          type="button"
-          className="relative grid min-h-10.5 w-34 shrink-0 grid-cols-2 gap-0 rounded-full border border-control-edge bg-sidebar p-1 text-body-sm text-engine-muted select-none transition-transform duration-120 ease-switch before:absolute before:inset-y-1 before:left-1 before:w-toggle-thumb before:rounded-inherit before:bg-selected before:shadow-toggle before:content-empty before:transition-transform before:duration-180 before:ease-switch aria-checked:before:translate-x-full [&_span]:relative [&_span]:z-1 hover:filter-none active:scale-98 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-brand-ink focus-visible:outline-offset-3 focus-visible:scale-100 focus-visible:transition-none focus-visible:before:transition-none motion-reduce:transition-none motion-reduce:before:transition-none motion-reduce:active:scale-100"
-          role="switch"
-          aria-label="细分开局统计"
-          aria-checked={!isFamily}
-          onClick={() =>
-            setView((current) => (current === "family" ? "detail" : "family"))
-          }
+          </Box>
+          <Heading as="h1" size="8">
+            开局统计
+          </Heading>
+        </Box>
+        <SegmentedControl.Root
+          value={view}
+          onValueChange={(value) => setView(value as "family" | "detail")}
+          aria-label="开局统计维度"
         >
-          <span
-            aria-hidden="true"
-            className={isFamily ? " text-selected-ink" : ""}
-          >
-            大类
-          </span>
-          <span
-            aria-hidden="true"
-            className={isFamily ? "" : " text-selected-ink"}
-          >
-            细分
-          </span>
-        </button>
-      </div>
+          <SegmentedControl.Item value="family">大类</SegmentedControl.Item>
+          <SegmentedControl.Item value="detail">细分</SegmentedControl.Item>
+        </SegmentedControl.Root>
+      </Flex>
       {error && (
-        <div className="mb-4.5 rounded-lg border border-notice-edge bg-notice px-3.75 py-3 text-body-sm text-notice-ink">
-          {error}
-        </div>
+        <Callout.Root size="1" className="mb-4.5">
+          <Callout.Text>{error}</Callout.Text>
+        </Callout.Root>
       )}
-      <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
+      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
         <OpponentTypeSelect value={opponentType} onChange={setOpponentType} />
         <Select
           label="执棋颜色"
@@ -114,105 +119,107 @@ export default function StatisticsPage() {
             { value: "classical", label: "Classical" },
           ]}
         />
-        <input
+        <TextField.Root
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
         />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-      </div>
-      {rows.length > 0 && (
-        <div className="rounded-xl border border-panel-edge bg-panel mb-4.5 p-4.5">
-          <ResponsiveContainer width="100%" height={isFamily ? 300 : 230}>
-            <BarChart
-              data={rows.slice(0, 8)}
-              layout={isFamily ? "vertical" : "horizontal"}
+        <TextField.Root
+          type="date"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+        />
+      </Card>
+      <Grid
+        columns={{ initial: "1", sm: "2" }}
+        gap="3"
+        mb="4"
+        aria-label="当前筛选整体统计"
+      >
+        <Card size="2" aria-label="整体胜率">
+          <Flex direction="column" gap="2">
+            <Text size="2" color="gray">
+              整体胜率
+            </Text>
+            <Heading size="7" className="tabular-nums">
+              {total && !error ? `${((wins / total) * 100).toFixed(1)}%` : "—"}
+            </Heading>
+            <Text size="1" color="gray">
+              {error
+                ? "统计加载失败"
+                : total
+                  ? `${wins} 胜 / ${total} 局`
+                  : "暂无对局"}
+            </Text>
+          </Flex>
+        </Card>
+        <Card size="2" aria-label="整体得分率">
+          <Flex direction="column" gap="2">
+            <Text size="2" color="gray">
+              整体得分率
+            </Text>
+            <Heading size="7" className="tabular-nums">
+              {total && !error ? `${((score / total) * 100).toFixed(1)}%` : "—"}
+            </Heading>
+            <Text
+              size="1"
+              color="gray"
+              title="每胜计 1 分、每和计 0.5 分、每负计 0 分"
             >
-              <CartesianGrid
-                stroke="var(--color-chart-grid)"
-                vertical={isFamily}
-                horizontal={!isFamily}
-              />
-              {isFamily ? (
-                <>
-                  <XAxis
-                    type="number"
-                    stroke="var(--color-chart-axis)"
-                    allowDecimals={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="opening"
-                    width={180}
-                    stroke="var(--color-chart-axis)"
-                    tick={{ fontSize: 12 }}
-                    interval={0}
-                    tickFormatter={(name: string) =>
-                      name.length > 26 ? `${name.slice(0, 25)}…` : name
-                    }
-                  />
-                </>
-              ) : (
-                <>
-                  <XAxis dataKey="eco" stroke="var(--color-chart-axis)" />
-                  <YAxis
-                    stroke="var(--color-chart-axis)"
-                    allowDecimals={false}
-                  />
-                </>
-              )}
-              <Tooltip />
-              <Bar
-                name="样本"
-                dataKey="total"
-                fill="var(--color-chart-bar)"
-                radius={isFamily ? [0, 4, 4, 0] : [4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-      <div className="rounded-xl border border-panel-edge bg-panel overflow-hidden">
-        <div className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+              {error
+                ? "统计加载失败"
+                : total
+                  ? `${score} 分 / ${total} 局 · 和棋计 0.5 分`
+                  : "暂无对局"}
+            </Text>
+          </Flex>
+        </Card>
+      </Grid>
+      <Card className="overflow-hidden p-0">
+        <Box className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           {isFamily ? "开局大类" : "开局细分"}
           <span>
             {rows.length} {isFamily ? "类" : "项"} · {total} 局
           </span>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              {!isFamily && <th>ECO</th>}
-              <th>{isFamily ? "开局大类" : "开局"}</th>
-              <th>样本</th>
-              <th>胜</th>
-              <th>和</th>
-              <th>负</th>
-              <th>胜率</th>
-              <th>得分率</th>
-            </tr>
-          </thead>
-          <tbody>
+        </Box>
+        <Table.Root>
+          <Table.Header>
+            <Table.Row>
+              {!isFamily && (
+                <Table.ColumnHeaderCell>ECO</Table.ColumnHeaderCell>
+              )}
+              <Table.ColumnHeaderCell>
+                {isFamily ? "开局大类" : "开局"}
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>样本</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>胜</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>和</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>负</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>胜率</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>得分率</Table.ColumnHeaderCell>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {rows.map((s) => (
-              <tr key={isFamily ? s.opening : `${s.eco}-${s.opening}`}>
-                {!isFamily && <td>{s.eco}</td>}
-                <td>{s.opening}</td>
-                <td>{s.total}</td>
-                <td>{s.wins}</td>
-                <td>{s.draws}</td>
-                <td>{s.losses}</td>
-                <td>{(s.winRate * 100).toFixed(1)}%</td>
-                <td>{(s.scoreRate * 100).toFixed(1)}%</td>
-              </tr>
+              <Table.Row key={isFamily ? s.opening : `${s.eco}-${s.opening}`}>
+                {!isFamily && <Table.Cell>{s.eco}</Table.Cell>}
+                <Table.Cell>{s.opening}</Table.Cell>
+                <Table.Cell>{s.total}</Table.Cell>
+                <Table.Cell>{s.wins}</Table.Cell>
+                <Table.Cell>{s.draws}</Table.Cell>
+                <Table.Cell>{s.losses}</Table.Cell>
+                <Table.Cell>{(s.winRate * 100).toFixed(1)}%</Table.Cell>
+                <Table.Cell>{(s.scoreRate * 100).toFixed(1)}%</Table.Cell>
+              </Table.Row>
             ))}
-          </tbody>
-        </table>
+          </Table.Body>
+        </Table.Root>
         {rows.length === 0 && (
-          <div className="px-5 py-15 text-center text-empty">
+          <Box className="px-5 py-15 text-center text-empty">
             暂无可统计的对局。
-          </div>
+          </Box>
         )}
-      </div>
+      </Card>
     </>
   );
 }

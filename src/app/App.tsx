@@ -1,3 +1,4 @@
+import { Box, Flex, Grid } from "@radix-ui/themes";
 import { lazy, Suspense } from "react";
 import { NavLink, Route, Routes, Navigate, useMatch } from "react-router-dom";
 import {
@@ -28,14 +29,20 @@ export default function App() {
   const reviewingGame = useMatch("/analysis/:id");
   const editingPuzzle = useMatch("/puzzles/:id/edit");
   return (
-    <div className="sidebar-wide h-dvh grid grid-cols-shell overflow-hidden max-[900px]:sidebar-compact">
+    <Grid className="sidebar-wide h-dvh grid-cols-shell overflow-hidden max-[900px]:sidebar-compact">
       <aside className="fixed inset-y-0 left-0 flex h-dvh w-sidebar flex-col overflow-y-auto overscroll-none border-r border-sidebar-edge bg-sidebar px-3.5 py-7">
-        <div className="flex items-center gap-3 px-3 pt-1 pb-8.5 text-brand-ink [&_strong]:block [&_strong]:text-brand-ink [&_strong]:tracking-brand [&_strong]:text-heading [&_small]:mt-1 [&_small]:block [&_small]:text-micro [&_small]:tracking-label [&_small]:text-brand-muted max-[900px]:px-1.25 max-[900px]:pb-7.5 max-[900px]:[&>div]:hidden">
+        <Flex
+          align="center"
+          gap="3"
+          px="3"
+          pt="1"
+          className="pb-8.5 text-brand-ink [&_strong]:block [&_strong]:text-brand-ink [&_strong]:tracking-brand [&_strong]:text-heading [&_small]:mt-1 [&_small]:block [&_small]:text-micro [&_small]:tracking-label [&_small]:text-brand-muted max-[900px]:px-1.25 max-[900px]:pb-7.5 max-[900px]:[&>div]:hidden"
+        >
           <ChessKnight size={24} />
-          <div>
+          <Box>
             <strong>Chess Trainer</strong>
-          </div>
-        </div>
+          </Box>
+        </Flex>
         <nav className="grid gap-1">
           {nav.map(([path, label, Icon]) => (
             <NavLink
@@ -56,9 +63,12 @@ export default function App() {
       >
         <Suspense
           fallback={
-            <div className="px-5 py-15 text-center text-empty grid min-h-70 place-items-center">
+            <Grid
+              px="5"
+              className="py-15 text-center text-empty min-h-70 place-items-center"
+            >
               加载中…
-            </div>
+            </Grid>
           }
         >
           <Routes>
@@ -83,6 +93,6 @@ export default function App() {
           </Routes>
         </Suspense>
       </main>
-    </div>
+    </Grid>
   );
 }
