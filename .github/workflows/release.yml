@@ -1,0 +1,61 @@
+name: Build and publish macOS release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_NOTES_PATH: release/notes.md
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate unique release version
+        id: version
+        run: node scripts/ci-version.mjs
+      - name: Check and test
+        run: |
+          pnpm exec eslint . --max-warnings 0
+          pnpm typecheck
+          pnpm test
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
+      - name: Build signed update and verify app icon
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_SIGNING_KEY"
+          umask 077
+          key_path="$RUNNER_TEMP/chess-trainer.key"
+          trap 'rm -f "$key_path" "$key_path.pub"' EXIT
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key_path"
+          node --input-type=module -e 'import fs from "node:fs"; const c=JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json","utf8")); fs.writeFileSync(process.argv[1], c.plugins.updater.pubkey+"\n");' "$key_path.pub"
+          TAURI_SIGNING_PRIVATE_KEY="$key_path" pnpm release:prepare
+      - name: Publish verified release
+        run: node scripts/ci-publish.mjs

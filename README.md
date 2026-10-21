@@ -36,7 +36,13 @@ pnpm tauri build --bundles app
 
 旧版 0.1.0 尚无更新入口，需要先从 Releases 下载 `.app.zip`，解压并把应用放入「应用程序」。此后的更新在应用内完成，应用数据仍保存在原来的 SQLite 目录，不随应用包替换。本版使用 ad-hoc 代码签名，尚未进行 Apple 公证，首次打开可能需要在系统「隐私与安全性」中允许。
 
-发布流程：同步提升 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本，更新 `docs/releases/v版本.md`；完成上述检查后运行 `pnpm release:prepare`。脚本会打包签名 `.app.tar.gz`、首次安装用 `.app.zip`、`.sig`、`latest.json` 和 `SHA256SUMS.txt` 至被 Git 忽略的 `release/`。提交并推送对应源码与版本标签，再用 `gh release create v版本 release/* --repo yansq/chess-trainer --notes-file docs/releases/v版本.md` 发布正式版本。不要将只含部分附件的草稿设为最新发布。
+自动发布由 `.github/workflows/release.yml` 负责：每次推送到 `main` 或在 Actions 手动运行，自动测试、构建 Apple Silicon 应用、签名、检查应用图标、生成更新清单并发布 GitHub Release。签名私钥存放在仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，可选密码为 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；只在签名步骤写入临时文件，步骤结束即清除。
+
+版本由源代码基准 `主版本.次版本.补丁偏移` 加该工作流的 `github.run_number` 得到（例如基准 `0.2.0` 的第 1、2 次运行生成 `0.2.1`、`0.2.2`）。失败运行可以留下版本空档；重新运行同一次构建沿用相同版本，已发布附件不会被覆盖。无需每次手工改版本或提交机器生成的版本更改，因此不会循环触发。升级主/次版本时，同步调整 package、Cargo 与 Tauri 三处基准版本；不要在同一主/次版本内降低补丁偏移。
+
+自动版本记录在构建包和更新清单，Release 标签指向本次推送的准确源码提交；源码中的基准版本保持不变。各推送独立构建，发布前先上传草稿、下载回读并逐项核对哈希，再按语义版本交由 GitHub 选择 latest，避免较旧构建覆盖更新版本。
+
+本地仍可运行 `pnpm release:prepare` 验证图标、签名与产物；它使用当前源码版本和 `docs/releases/v版本.md`，不会自动发布。自动流程会为每次推送生成独立更新说明。产物包含 `.app.tar.gz`、首次安装 `.app.zip`、`.sig`、`latest.json` 和 `SHA256SUMS.txt`。
 
 Updater 私钥默认读取本机 `~/.tauri/chess-trainer.key`（权限 0600），也可用 `TAURI_SIGNING_PRIVATE_KEY` 指定文件路径；相邻 `.pub` 必须与配置中公钥一致。私钥不进仓库、不上传 Release，需自行安全备份；更换或遗失密钥会影响已安装应用的后续更新验证。需要密码时通过 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供，不要写入代码。
 

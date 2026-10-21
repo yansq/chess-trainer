@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir, arch, platform } from "node:os";
 import { resolve, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { verifyAppIcon } from "./verify-app-icon.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 process.chdir(root);
@@ -44,6 +45,7 @@ const builtVersion = execFileSync(
 ).trim();
 if (builtVersion !== version) throw Error("Built app version mismatch");
 run("codesign", ["--verify", "--deep", "--strict", app]);
+await verifyAppIcon(app);
 const name = `Chess-Trainer_${version}_aarch64.app`;
 await mkdir("release", { recursive: true });
 await copyFile(`${app}.tar.gz`, `release/${name}.tar.gz`);
@@ -56,7 +58,10 @@ run("ditto", [
   app,
   `release/${name}.zip`,
 ]);
-const notes = await readFile(`docs/releases/v${version}.md`, "utf8");
+const notes = await readFile(
+  process.env.RELEASE_NOTES_PATH || `docs/releases/v${version}.md`,
+  "utf8",
+);
 const signature = (await readFile(`release/${name}.tar.gz.sig`, "utf8")).trim();
 if (!signature) throw Error("Updater signature is empty");
 await writeFile(
