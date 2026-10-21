@@ -1,5 +1,5 @@
 import { readFile, mkdtemp, rm, appendFile } from "node:fs/promises";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,20 +11,24 @@ const { version } = JSON.parse(
   await readFile("src-tauri/tauri.conf.json", "utf8"),
 );
 const tag = `v${version}`;
-const api = (route, body) =>
+const api = (route, body, method = "PATCH") =>
   JSON.parse(
     execFileSync(
       "gh",
-      ["api", route, ...(body ? ["--method", "PATCH", "--input", "-"] : [])],
+      ["api", route, ...(body ? ["--method", method, "--input", "-"] : [])],
       { encoding: "utf8", ...(body ? { input: JSON.stringify(body) } : {}) },
     ),
   );
-const lookup = spawnSync("gh", ["api", `repos/${repo}/releases/tags/${tag}`], {
-  encoding: "utf8",
-});
-let release;
-if (lookup.status === 0) {
-  release = JSON.parse(lookup.stdout);
+// Drafts without a published tag are absent from the by-tag endpoint.
+const releases = JSON.parse(
+  execFileSync(
+    "gh",
+    ["api", `repos/${repo}/releases?per_page=100`, "--paginate", "--slurp"],
+    { encoding: "utf8" },
+  ),
+).flat();
+let release = releases.find((entry) => entry.tag_name === tag);
+if (release) {
   if (release.target_commitish !== sha)
     throw Error("Existing release belongs to another source commit");
   if (!release.draft) {
@@ -32,26 +36,17 @@ if (lookup.status === 0) {
     process.exit(0);
   }
 } else {
-  if (!lookup.stderr.includes("404")) throw Error(lookup.stderr);
-  execFileSync(
-    "gh",
-    [
-      "release",
-      "create",
-      tag,
-      "--repo",
-      repo,
-      "--target",
-      sha,
-      "--draft",
-      "--title",
-      `Chess Trainer ${version}`,
-      "--notes-file",
-      "release/notes.md",
-    ],
-    { stdio: "inherit" },
+  release = api(
+    `repos/${repo}/releases`,
+    {
+      tag_name: tag,
+      target_commitish: sha,
+      draft: true,
+      name: `Chess Trainer ${version}`,
+      body: await readFile("release/notes.md", "utf8"),
+    },
+    "POST",
   );
-  release = api(`repos/${repo}/releases/tags/${tag}`);
 }
 const name = `Chess-Trainer_${version}_aarch64.app`;
 const files = [
