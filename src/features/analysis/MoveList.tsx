@@ -59,7 +59,9 @@ export default function MoveList({
         color="gray"
         ref={tree.currentId === move.id ? selectedRef : undefined}
         className={
-          compact ? "inline-flex h-auto gap-1 align-baseline" : "justify-start"
+          compact
+            ? "m-0 box-border inline-flex h-auto w-28 min-w-0 gap-1 px-1 py-0 align-baseline font-normal"
+            : "m-0 box-border h-6 min-w-0 justify-start px-2 py-0 font-normal"
         }
         onClick={() => onSelect(move.id)}
         aria-label={`${move.sourceMoveId ? "主线" : "分支"} ${moveNumber(move)} ${move.san}`}
@@ -67,22 +69,29 @@ export default function MoveList({
       >
         {(numbered || move.fenBefore.split(" ")[1] === "w") && (
           <small
-            className={`text-move-number ${compact ? "m-0 text-inherit-size" : "mr-1"}`}
+            className={`text-move-number ${compact ? "m-0 text-inherit-size" : "w-6 shrink-0 text-left"}`}
           >
             {moveNumber(move)}
           </small>
         )}
-        {move.san}
-        {badge && (
-          <span
-            className={` ml-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-0.5 text-eyebrow font-bold leading-none ${badge.color}`}
-            data-category={category}
-            title={`${category} · ${badge.label}`}
-            aria-label={badge.label}
-          >
-            {badge.symbol}
-          </span>
-        )}
+        <span className="min-w-0 flex-1 truncate text-left" title={move.san}>
+          {move.san}
+        </span>
+        <span
+          className="inline-flex h-4 w-5 shrink-0 items-center justify-center"
+          data-quality-slot
+        >
+          {badge && (
+            <span
+              className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-eyebrow font-bold leading-none ${badge.color}`}
+              data-category={category}
+              title={`${category} · ${badge.label}`}
+              aria-label={badge.label}
+            >
+              {badge.symbol}
+            </span>
+          )}
+        </span>
       </Button>
     );
   }
@@ -204,7 +213,7 @@ export default function MoveList({
           variant={tree.currentId === null ? "soft" : "ghost"}
           color="gray"
           ref={tree.currentId === null ? selectedRef : undefined}
-          className="mb-1 w-full justify-start"
+          className="m-0 mb-1 box-border h-6 w-full justify-start px-2 py-0 font-normal"
           onClick={() => onSelect(null)}
         >
           初始局面

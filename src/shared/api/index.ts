@@ -90,6 +90,7 @@ export const api = {
     depth: number,
     requestId?: string,
     onUpdate?: (analysis: EngineAnalysis) => void,
+    multipv: 1 | 3 = 1,
   ) => {
     const channel = new Channel<EngineAnalysis>(onUpdate);
     return invoke<EngineAnalysis>("engine_analyze", {
@@ -98,6 +99,7 @@ export const api = {
       depth,
       requestId: requestId ?? null,
       onUpdate: channel,
+      multipv,
     });
   },
   engineStop: (requestId?: string) =>

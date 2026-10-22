@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use tokio::{
@@ -10,13 +10,17 @@ use tokio::{
 };
 
 pub struct EngineManager {
-    session: Mutex<Option<EngineSession>>,
+    session: Arc<Mutex<Option<EngineSession>>>,
+    candidates_session: Arc<Mutex<Option<EngineSession>>>,
+    searches: StdMutex<HashMap<SearchKey, Weak<SharedSearch>>>,
     jobs: StdMutex<Vec<Weak<AnalysisJob>>>,
 }
 impl EngineManager {
     pub fn new() -> Self {
         Self {
-            session: Mutex::new(None),
+            session: Arc::new(Mutex::new(None)),
+            candidates_session: Arc::new(Mutex::new(None)),
+            searches: StdMutex::new(HashMap::new()),
             jobs: StdMutex::new(Vec::new()),
         }
     }
@@ -48,7 +52,121 @@ struct AnalysisJob {
     request_id: Option<String>,
     cancel: watch::Sender<bool>,
 }
-pub const MULTIPV: u32 = 3;
+pub const MAX_MULTIPV: u32 = 3;
+#[cfg(test)]
+const BACKGROUND_THREADS: u32 = 4;
+#[cfg(test)]
+const FOREGROUND_THREADS: u32 = 4;
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(45);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct EngineOptions {
+    pub threads: u32,
+    pub hash_mb: u32,
+}
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self {
+            threads: 4,
+            hash_mb: 256,
+        }
+    }
+}
+impl EngineOptions {
+    pub fn from_settings(threads: Option<&str>, hash_mb: Option<&str>) -> Result<Self, String> {
+        let options = Self {
+            threads: threads
+                .unwrap_or("4")
+                .parse()
+                .map_err(|_| "Threads须为1～64的整数")?,
+            hash_mb: hash_mb
+                .unwrap_or("256")
+                .parse()
+                .map_err(|_| "Hash须为1～4096 MB的整数")?,
+        };
+        options.validate()?;
+        Ok(options)
+    }
+    fn validate(self) -> Result<(), String> {
+        if !(1..=64).contains(&self.threads) {
+            return Err("Threads须为1～64的整数".into());
+        }
+        if !(1..=4096).contains(&self.hash_mb) {
+            return Err("Hash须为1～4096 MB的整数".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct SearchKey {
+    path: String,
+    modified: Option<std::time::SystemTime>,
+    fen: String,
+    depth: u32,
+    multipv: u32,
+    options: EngineOptions,
+}
+#[derive(Clone, Default)]
+struct SharedState {
+    latest: Option<Analysis>,
+    result: Option<Result<Analysis, String>>,
+}
+struct SharedSearch {
+    state: watch::Sender<SharedState>,
+    cancel: watch::Sender<bool>,
+    subscribers: StdMutex<usize>,
+}
+struct Subscription(Arc<SharedSearch>);
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        let mut subscribers = self.0.subscribers.lock().unwrap();
+        *subscribers -= 1;
+        if *subscribers == 0 {
+            self.0.cancel.send_replace(true);
+        }
+    }
+}
+impl EngineManager {
+    fn subscribe(&self, key: SearchKey, budget: Duration) -> Subscription {
+        let mut searches = self.searches.lock().unwrap();
+        searches.retain(|_, search| search.strong_count() > 0);
+        if let Some(shared) = searches.get(&key).and_then(Weak::upgrade) {
+            let mut count = shared.subscribers.lock().unwrap();
+            if !*shared.cancel.borrow() && !matches!(shared.state.borrow().result, Some(Err(_))) {
+                *count += 1;
+                drop(count);
+                return Subscription(shared);
+            }
+        }
+        let (state, _) = watch::channel(SharedState::default());
+        let (cancel, cancelled) = watch::channel(false);
+        let shared = Arc::new(SharedSearch {
+            state,
+            cancel,
+            subscribers: StdMutex::new(1),
+        });
+        searches.insert(key.clone(), Arc::downgrade(&shared));
+        let worker = shared.clone();
+        let lane = if key.multipv == 1 {
+            self.session.clone()
+        } else {
+            self.candidates_session.clone()
+        };
+        tokio::spawn(async move {
+            let result = run_search(lane, &key, cancelled, budget, |analysis| {
+                worker
+                    .state
+                    .send_modify(|state| state.latest = Some(analysis));
+            })
+            .await;
+            worker
+                .state
+                .send_modify(|state| state.result = Some(result));
+        });
+        Subscription(shared)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,7 +234,7 @@ pub fn parse_info(line: &str, fen: &str) -> Option<Variation> {
         }
     }
     let (score_type, raw) = score?;
-    if !(1..=MULTIPV).contains(&multipv) {
+    if !(1..=MAX_MULTIPV).contains(&multipv) {
         return None;
     }
     let white_to_move = fen.split_whitespace().nth(1) == Some("w");
@@ -136,13 +254,26 @@ pub fn validate(path: &str) -> Result<(), String> {
     Ok(())
 }
 // Keep completed MultiPV iterations together so ranks from different depths never mix.
-#[derive(Default)]
 struct SearchProgress {
+    multipv: u32,
     depth: u32,
     variations: BTreeMap<u32, Variation>,
     completed: Option<Analysis>,
 }
+impl Default for SearchProgress {
+    fn default() -> Self {
+        Self::new(MAX_MULTIPV)
+    }
+}
 impl SearchProgress {
+    fn new(multipv: u32) -> Self {
+        Self {
+            multipv,
+            depth: 0,
+            variations: BTreeMap::new(),
+            completed: None,
+        }
+    }
     fn update(&mut self, fen: &str, variation: Variation) -> Option<Analysis> {
         if variation.pv.is_empty() || variation.depth < self.depth {
             return None;
@@ -160,7 +291,7 @@ impl SearchProgress {
             self.depth = variation.depth;
         }
         self.variations.insert(variation.rank, variation);
-        if self.variations.len() == MULTIPV as usize {
+        if self.variations.len() == self.multipv as usize {
             ready = self.snapshot(fen);
             self.completed = ready.clone();
         }
@@ -189,11 +320,17 @@ struct EngineSession {
     path: String,
     modified: Option<std::time::SystemTime>,
     child: Child,
+    threads: u32,
+    hash_mb: u32,
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
 }
 impl EngineSession {
-    async fn start(path: &str, modified: Option<std::time::SystemTime>) -> Result<Self, String> {
+    async fn start(
+        path: &str,
+        modified: Option<std::time::SystemTime>,
+        options: EngineOptions,
+    ) -> Result<Self, String> {
         let mut child = Command::new(path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -207,15 +344,16 @@ impl EngineSession {
             path: path.into(),
             modified,
             child,
+            threads: options.threads,
+            hash_mb: options.hash_mb,
             stdin,
             lines: BufReader::new(stdout).lines(),
         };
         session.send("uci\n").await?;
         session.read_until("uciok").await?;
+        let EngineOptions { threads, hash_mb } = options;
         session
-            .send(&format!(
-                "setoption name Hash value 128\nsetoption name MultiPV value {MULTIPV}\nisready\n"
-            ))
+            .send(&format!("setoption name Threads value {threads}\nsetoption name Hash value {hash_mb}\nsetoption name MultiPV value 1\nisready\n"))
             .await?;
         session.read_until("readyok").await?;
         Ok(session)
@@ -242,14 +380,15 @@ impl EngineSession {
         &mut self,
         fen: &str,
         depth: u32,
+        multipv: u32,
         mut on_update: impl FnMut(Analysis),
     ) -> Result<Analysis, String> {
         self.send(&format!(
-            "position fen {fen}\ngo depth {}\n",
+            "setoption name MultiPV value {multipv}\nposition fen {fen}\ngo depth {}\n",
             depth.clamp(4, 30)
         ))
         .await?;
-        let mut progress = SearchProgress::default();
+        let mut progress = SearchProgress::new(multipv);
         loop {
             let line = self.read_line().await?;
             if let Some(variation) = parse_info(&line, fen) {
@@ -269,52 +408,155 @@ impl EngineSession {
     }
 }
 
+#[cfg(test)]
 pub async fn analyze(
     manager: &EngineManager,
     path: &str,
     fen: &str,
     depth: u32,
+    multipv: u32,
     request_id: Option<&str>,
     on_update: impl FnMut(Analysis),
 ) -> Result<Analysis, String> {
+    analyze_with_options(
+        manager,
+        path,
+        fen,
+        depth,
+        multipv,
+        EngineOptions::default(),
+        request_id,
+        on_update,
+    )
+    .await
+}
+pub async fn analyze_with_options(
+    manager: &EngineManager,
+    path: &str,
+    fen: &str,
+    depth: u32,
+    multipv: u32,
+    options: EngineOptions,
+    request_id: Option<&str>,
+    on_update: impl FnMut(Analysis),
+) -> Result<Analysis, String> {
+    analyze_with_budget(
+        manager,
+        path,
+        fen,
+        depth,
+        multipv,
+        options,
+        request_id,
+        SEARCH_TIMEOUT,
+        on_update,
+    )
+    .await
+}
+async fn analyze_with_budget(
+    manager: &EngineManager,
+    path: &str,
+    fen: &str,
+    depth: u32,
+    multipv: u32,
+    options: EngineOptions,
+    request_id: Option<&str>,
+    budget: Duration,
+    mut on_update: impl FnMut(Analysis),
+) -> Result<Analysis, String> {
     validate(path)?;
-    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    options.validate()?;
+    if !(1..=MAX_MULTIPV).contains(&multipv) {
+        return Err("MultiPV必须介于1和3之间".into());
+    }
     let job = manager.register(request_id);
     let mut cancelled = job.cancel.subscribe();
+    let subscription = manager.subscribe(
+        SearchKey {
+            path: path.into(),
+            modified: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
+            fen: fen.into(),
+            depth: depth.clamp(4, 30),
+            multipv,
+            options,
+        },
+        budget,
+    );
+    let mut state = subscription.0.state.subscribe();
+    let mut reported_depth = 0;
+    loop {
+        let snapshot = state.borrow_and_update().clone();
+        if let Some(analysis) = snapshot.latest {
+            if analysis.variations[0].depth > reported_depth {
+                reported_depth = analysis.variations[0].depth;
+                on_update(analysis);
+            }
+        }
+        if *cancelled.borrow() {
+            return Err("分析已取消".into());
+        }
+        if let Some(result) = snapshot.result {
+            return result;
+        }
+        tokio::select! {
+            biased;
+            _ = cancelled.changed() => {},
+            changed = state.changed() => { changed.map_err(|_| "引擎任务提前退出".to_string())?; },
+        }
+    }
+}
+async fn run_search(
+    lane: Arc<Mutex<Option<EngineSession>>>,
+    key: &SearchKey,
+    mut cancelled: watch::Receiver<bool>,
+    budget: Duration,
+    on_update: impl FnMut(Analysis),
+) -> Result<Analysis, String> {
     let mut session = tokio::select! {
         biased;
         _ = cancelled.changed() => return Err("分析已取消".into()),
-        session = manager.session.lock() => session,
+        session = lane.lock() => session,
     };
     if *cancelled.borrow() {
         return Err("分析已取消".into());
     }
+    let EngineOptions { threads, hash_mb } = key.options;
     let reusable = session.as_mut().is_some_and(|s| {
-        s.path == path && s.modified == modified && matches!(s.child.try_wait(), Ok(None))
+        s.path == key.path
+            && s.modified == key.modified
+            && s.threads == threads
+            && s.hash_mb == hash_mb
+            && matches!(s.child.try_wait(), Ok(None))
     });
     if !reusable {
         *session = None;
         let started = tokio::select! {
             biased;
             _ = cancelled.changed() => return Err("分析已取消".into()),
-            result = timeout(Duration::from_secs(10), EngineSession::start(path, modified)) => result.map_err(|_| "引擎启动超时".to_string())?,
+            result = timeout(Duration::from_secs(10), EngineSession::start(&key.path, key.modified, key.options)) => result.map_err(|_| "引擎启动超时".to_string())?,
         };
         *session = Some(started?);
     }
     let engine = session.as_mut().unwrap();
-    let result = tokio::select! {
+    // Cancellation and timeout stop cleanly, retaining the process and its hash.
+    let interrupted = tokio::select! {
         biased;
-        _ = cancelled.changed() => {
-            let stopped = timeout(Duration::from_secs(2), engine.stop()).await;
-            if !matches!(stopped, Ok(Ok(()))) { *session = None; }
-            return Err("分析已取消".into());
-        }
-        result = timeout(Duration::from_secs(45), engine.search(fen, depth, on_update)) => result.map_err(|_| "引擎分析超时".to_string()).and_then(|r| r),
+        _ = cancelled.changed() => "分析已取消",
+        result = timeout(budget, engine.search(&key.fen, key.depth, key.multipv, on_update)) => {
+            match result {
+                Ok(result) => {
+                    if result.is_err() { *session = None; }
+                    return result;
+                }
+                Err(_) => "引擎分析超时",
+            }
+        },
     };
-    if result.is_err() {
+    let stopped = timeout(Duration::from_secs(2), engine.stop()).await;
+    if !matches!(stopped, Ok(Ok(()))) {
         *session = None;
     }
-    result
+    Err(interrupted.into())
 }
 #[cfg(test)]
 mod tests {
@@ -347,6 +589,13 @@ mod tests {
         let final_result = progress.finish(fen).unwrap();
         assert_eq!(final_result.variations[0].depth, 4);
         assert_eq!(final_result.variations.len(), 3);
+    }
+    #[test]
+    fn single_pv_streams_without_waiting_for_other_ranks() {
+        let mut progress = SearchProgress::new(1);
+        let first = progress.update("start", variation(4, 1)).unwrap();
+        assert_eq!(first.variations.len(), 1);
+        assert_eq!(first.variations[0].depth, 4);
     }
     #[test]
     fn streaming_handles_positions_with_only_one_legal_move() {
@@ -430,13 +679,13 @@ mod native_tests {
         }
         let manager = EngineManager::new();
         let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        let result = analyze(&manager, &path, fen, 4, None, |_| {})
+        let result = analyze(&manager, &path, fen, 4, 1, None, |_| {})
             .await
             .unwrap();
         assert_eq!(result.fen, fen);
         assert!(result.variations[0].depth >= 4);
         assert!(!result.variations[0].pv.is_empty());
-        assert_eq!(result.variations.len(), 3);
+        assert_eq!(result.variations.len(), 1);
         let moves: std::collections::HashSet<_> = result
             .variations
             .iter()
@@ -445,13 +694,17 @@ mod native_tests {
                 v.pv.first().unwrap()
             })
             .collect();
-        assert_eq!(moves.len(), 3);
+        assert_eq!(moves.len(), 1);
         let pid = manager.session.lock().await.as_ref().unwrap().child.id();
+        assert_eq!(
+            manager.session.lock().await.as_ref().unwrap().threads,
+            BACKGROUND_THREADS
+        );
         let started = std::time::Instant::now();
         let mut first_update = None;
-        let streamed = analyze(&manager, &path, fen, 14, Some("stream"), |analysis| {
+        let streamed = analyze(&manager, &path, fen, 14, 1, Some("stream"), |analysis| {
             first_update.get_or_insert((started.elapsed(), analysis.variations[0].depth));
-            assert_eq!(analysis.variations.len(), 3);
+            assert_eq!(analysis.variations.len(), 1);
             assert!(analysis
                 .variations
                 .iter()
@@ -471,7 +724,7 @@ mod native_tests {
             "复用引擎：首次推荐 {:?}（深度 {}），完成 {:?}（深度 {}）",
             first_elapsed, first_depth, elapsed, streamed.variations[0].depth
         );
-        let pending = analyze(&manager, &path, fen, 30, Some("current"), |_| {});
+        let pending = analyze(&manager, &path, fen, 30, 1, Some("current"), |_| {});
         tokio::pin!(pending);
         tokio::select! {
             result = &mut pending => panic!("深度 30 在取消前意外完成: {result:?}"),
@@ -485,11 +738,11 @@ mod native_tests {
         manager.stop(Some("current"));
         assert!(pending.await.is_err());
         let next_fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
-        let next = analyze(&manager, &path, next_fen, 4, None, |_| {})
+        let next = analyze(&manager, &path, next_fen, 4, 1, None, |_| {})
             .await
             .unwrap();
         assert_eq!(next.fen, next_fen);
-        assert_eq!(next.variations.len(), 3);
+        assert_eq!(next.variations.len(), 1);
         assert_eq!(
             pid,
             manager.session.lock().await.as_ref().unwrap().child.id()
@@ -500,8 +753,8 @@ mod native_tests {
             .all(|v| matches!(v.pv[0].as_bytes()[1], b'7' | b'8')));
 
         // Cancelling a queued request must not stop the active search or start later.
-        let active = analyze(&manager, &path, fen, 30, Some("active"), |_| {});
-        let queued = analyze(&manager, &path, next_fen, 30, Some("queued"), |_| {
+        let active = analyze(&manager, &path, fen, 30, 1, Some("active"), |_| {});
+        let queued = analyze(&manager, &path, next_fen, 30, 1, Some("queued"), |_| {
             panic!("取消的排队请求不应启动")
         });
         let cancel = async {
@@ -514,6 +767,42 @@ mod native_tests {
         assert_eq!(active_result.unwrap_err(), "分析已取消");
         assert_eq!(queued_result.unwrap_err(), "分析已取消");
 
+        // The selected position must finish even while the single-PV lane is busy.
+        let background = analyze(&manager, &path, fen, 30, 1, Some("background"), |_| {});
+        tokio::pin!(background);
+        tokio::select! {
+            result = &mut background => panic!("Background finished too soon: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_millis(30)) => {}
+        }
+        let detailed = tokio::select! {
+            result = &mut background => panic!("Foreground waited for background: {result:?}"),
+            result = analyze(&manager, &path, next_fen, 4, 3, Some("selected"), |_| {}) => result.unwrap(),
+        };
+        assert_eq!(detailed.variations.len(), 3);
+        assert_eq!(
+            manager
+                .candidates_session
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .threads,
+            FOREGROUND_THREADS
+        );
+        assert_ne!(
+            pid,
+            manager
+                .candidates_session
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .child
+                .id()
+        );
+        manager.stop(Some("background"));
+        assert_eq!(background.await.unwrap_err(), "分析已取消");
+
         // Recover automatically if an idle process has exited.
         manager
             .session
@@ -525,13 +814,408 @@ mod native_tests {
             .kill()
             .await
             .unwrap();
-        let recovered = analyze(&manager, &path, fen, 4, None, |_| {})
+        let recovered = analyze(&manager, &path, fen, 4, 1, None, |_| {})
             .await
             .unwrap();
-        assert_eq!(recovered.variations.len(), 3);
+        assert_eq!(recovered.variations.len(), 1);
         assert_ne!(
             pid,
             manager.session.lock().await.as_ref().unwrap().child.id()
+        );
+    }
+}
+
+#[cfg(test)]
+mod sharing_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct FakeEngine {
+        path: std::path::PathBuf,
+        log: std::path::PathBuf,
+    }
+    impl FakeEngine {
+        fn new() -> Self {
+            let id = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("chess-uci-{id}.py"));
+            let log = path.with_extension("log");
+            let script = r#"#!/usr/bin/env python3
+import sys,threading,time
+log=__LOG__
+generation=0
+active=False
+multipv=1
+
+def emit(depth):
+    for rank in range(1,multipv+1):
+        print(f'info depth {depth} multipv {rank} score cp 20 pv e2e4 e7e5',flush=True)
+
+for raw in sys.stdin:
+    line=raw.strip()
+    with open(log,'a') as f: f.write(line+'\n')
+    if line=='uci': print('uciok',flush=True)
+    elif line=='isready': print('readyok',flush=True)
+    elif line.startswith('setoption name MultiPV'): multipv=int(line.split()[-1])
+    elif line.startswith('go depth'):
+        generation+=1
+        active=True
+        depth=int(line.split()[-1])
+        emit(4)
+        if depth>=8: emit(8)
+        if depth<=8:
+            active=False
+            print('bestmove e2e4',flush=True)
+        elif depth<30:
+            def finish(g=generation,d=depth):
+                global active
+                time.sleep(.2)
+                if generation==g and active:
+                    emit(d)
+                    active=False
+                    print('bestmove e2e4',flush=True)
+            threading.Thread(target=finish,daemon=True).start()
+    elif line=='stop':
+        generation+=1
+        if active:
+            active=False
+            print('bestmove e2e4',flush=True)
+    elif line=='quit': break
+"#
+            .replace(
+                "__LOG__",
+                &serde_json::to_string(&log.to_string_lossy()).unwrap(),
+            );
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            Self { path, log }
+        }
+        fn commands(&self) -> Vec<String> {
+            std::fs::read_to_string(&self.log)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        }
+        fn path(&self) -> &str {
+            self.path.to_str().unwrap()
+        }
+    }
+    impl Drop for FakeEngine {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+            let _ = std::fs::remove_file(&self.log);
+        }
+    }
+    async fn wait_for(flag: &AtomicBool) {
+        timeout(Duration::from_secs(5), async {
+            while !flag.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    #[test]
+    fn resource_settings_validate_and_default() {
+        assert_eq!(
+            EngineOptions::from_settings(None, None).unwrap(),
+            EngineOptions::default()
+        );
+        assert_eq!(
+            EngineOptions::from_settings(Some("3"), Some("64")).unwrap(),
+            EngineOptions {
+                threads: 3,
+                hash_mb: 64
+            }
+        );
+        for value in ["", "0", "65", "1.5", "bad"] {
+            assert!(EngineOptions::from_settings(Some(value), None).is_err());
+        }
+        for value in ["", "0", "4097", "2.5", "bad"] {
+            assert!(EngineOptions::from_settings(None, Some(value)).is_err());
+        }
+    }
+    #[tokio::test]
+    async fn requests_with_different_resources_are_not_merged() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let first = analyze_with_options(
+            &manager,
+            engine.path(),
+            "same",
+            4,
+            1,
+            EngineOptions {
+                threads: 2,
+                hash_mb: 32,
+            },
+            None,
+            |_| {},
+        );
+        let second = analyze_with_options(
+            &manager,
+            engine.path(),
+            "same",
+            4,
+            1,
+            EngineOptions {
+                threads: 3,
+                hash_mb: 64,
+            },
+            None,
+            |_| {},
+        );
+        let (first, second) = tokio::join!(first, second);
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(
+            engine
+                .commands()
+                .iter()
+                .filter(|c| c.starts_with("go "))
+                .count(),
+            2
+        );
+    }
+    #[tokio::test]
+    async fn configured_resources_reach_uci_and_restart_only_when_changed() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let first = EngineOptions {
+            threads: 2,
+            hash_mb: 32,
+        };
+        analyze_with_options(&manager, engine.path(), "first", 4, 1, first, None, |_| {})
+            .await
+            .unwrap();
+        let pid = manager.session.lock().await.as_ref().unwrap().child.id();
+        analyze_with_options(&manager, engine.path(), "second", 4, 1, first, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(
+            pid,
+            manager.session.lock().await.as_ref().unwrap().child.id()
+        );
+        let hash_changed = EngineOptions {
+            threads: 2,
+            hash_mb: 64,
+        };
+        analyze_with_options(
+            &manager,
+            engine.path(),
+            "hash changed",
+            4,
+            1,
+            hash_changed,
+            None,
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let hash_pid = manager.session.lock().await.as_ref().unwrap().child.id();
+        assert_ne!(pid, hash_pid);
+        let changed = EngineOptions {
+            threads: 3,
+            hash_mb: 64,
+        };
+        analyze_with_options(
+            &manager,
+            engine.path(),
+            "third",
+            4,
+            1,
+            changed,
+            None,
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert_ne!(
+            hash_pid,
+            manager.session.lock().await.as_ref().unwrap().child.id()
+        );
+        analyze_with_options(
+            &manager,
+            engine.path(),
+            "fourth",
+            4,
+            3,
+            changed,
+            None,
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let commands = engine.commands();
+        for command in [
+            "setoption name Threads value 2",
+            "setoption name Hash value 32",
+            "setoption name Threads value 3",
+            "setoption name Hash value 64",
+        ] {
+            assert!(commands.contains(&command.to_string()), "missing {command}");
+        }
+        assert_eq!(commands.iter().filter(|c| c.as_str() == "uci").count(), 4);
+    }
+    #[tokio::test]
+    async fn duplicate_requests_share_one_search_and_cancel_independently() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let first_seen = AtomicBool::new(false);
+        let second_seen = AtomicBool::new(false);
+        let first = analyze(
+            &manager,
+            engine.path(),
+            "same",
+            12,
+            1,
+            Some("first"),
+            |_| {
+                first_seen.store(true, Ordering::SeqCst);
+            },
+        );
+        let second = analyze(
+            &manager,
+            engine.path(),
+            "same",
+            12,
+            1,
+            Some("second"),
+            |_| {
+                second_seen.store(true, Ordering::SeqCst);
+            },
+        );
+        let cancel = async {
+            wait_for(&first_seen).await;
+            wait_for(&second_seen).await;
+            manager.stop(Some("first"));
+        };
+        let (first, second, _) = tokio::join!(first, second, cancel);
+        assert_eq!(first.unwrap_err(), "分析已取消");
+        assert_eq!(second.unwrap().variations[0].depth, 12);
+        assert_eq!(
+            engine
+                .commands()
+                .iter()
+                .filter(|s| s.starts_with("go "))
+                .count(),
+            1
+        );
+        assert!(!engine.commands().iter().any(|s| s == "stop"));
+        assert!(engine
+            .commands()
+            .contains(&"setoption name Threads value 4".to_string()));
+    }
+    #[tokio::test]
+    async fn timeout_preserves_checkpoint_and_engine_process_for_retry() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let result = analyze_with_budget(
+            &manager,
+            engine.path(),
+            "partial",
+            30,
+            1,
+            EngineOptions::default(),
+            Some("timeout"),
+            Duration::from_millis(300),
+            |a| {
+                crate::db::repository::engine_cache_save(&db, engine.path(), "v1", 1, &a).unwrap();
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), "引擎分析超时");
+        let pid = manager.session.lock().await.as_ref().unwrap().child.id();
+        let partial =
+            crate::db::repository::engine_cache_get(&db, "partial", engine.path(), "v1", 4, 1)
+                .unwrap()
+                .unwrap();
+        assert_eq!(partial.variations[0].depth, 8);
+        assert!(crate::db::repository::engine_cache_get(
+            &db,
+            "partial",
+            engine.path(),
+            "v1",
+            22,
+            1
+        )
+        .unwrap()
+        .is_none());
+        analyze(&manager, engine.path(), "next", 4, 1, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(
+            pid,
+            manager.session.lock().await.as_ref().unwrap().child.id()
+        );
+        assert_eq!(engine.commands().iter().filter(|s| *s == "uci").count(), 1);
+        assert_eq!(engine.commands().iter().filter(|s| *s == "stop").count(), 1);
+    }
+    #[tokio::test]
+    async fn dropping_last_subscriber_stops_search_and_keeps_checkpoint() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let seen = AtomicBool::new(false);
+        let mut latest = None;
+        {
+            let pending = analyze(
+                &manager,
+                engine.path(),
+                "cancelled",
+                30,
+                3,
+                Some("dropped"),
+                |a| {
+                    if a.variations[0].depth >= 8 {
+                        seen.store(true, Ordering::SeqCst);
+                    }
+                    latest = Some(a);
+                },
+            );
+            tokio::pin!(pending);
+            tokio::select! { result=&mut pending => panic!("Unexpected completion: {result:?}"), _=wait_for(&seen) => {} }
+        }
+        assert_eq!(latest.unwrap().variations[0].depth, 8);
+        analyze(&manager, engine.path(), "next", 4, 3, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(engine.commands().iter().filter(|s| *s == "stop").count(), 1);
+        assert_eq!(engine.commands().iter().filter(|s| *s == "uci").count(), 1);
+        assert!(engine
+            .commands()
+            .contains(&"setoption name Threads value 4".to_string()));
+    }
+    #[tokio::test]
+    async fn different_depths_and_multipv_are_not_merged() {
+        let engine = FakeEngine::new();
+        let manager = EngineManager::new();
+        let one = analyze(&manager, engine.path(), "same", 4, 1, Some("one"), |_| {});
+        let deeper = analyze(
+            &manager,
+            engine.path(),
+            "same",
+            8,
+            1,
+            Some("deeper"),
+            |_| {},
+        );
+        let three = analyze(&manager, engine.path(), "same", 4, 3, Some("three"), |_| {});
+        let (one, deeper, three) = tokio::join!(one, deeper, three);
+        assert_eq!(one.unwrap().variations.len(), 1);
+        assert_eq!(deeper.unwrap().variations[0].depth, 8);
+        assert_eq!(three.unwrap().variations.len(), 3);
+        assert_eq!(
+            engine
+                .commands()
+                .iter()
+                .filter(|s| s.starts_with("go "))
+                .count(),
+            3
         );
     }
 }

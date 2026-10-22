@@ -1,3 +1,5 @@
+import { getEngineDepth } from "./engine-settings";
+import { Chess, validateFen } from "chess.js";
 import { api, type EngineAnalysis } from "../../shared/api";
 
 export interface PositionAnalysis {
@@ -16,6 +18,28 @@ export function startPositionAnalysis(
     "getSetting" | "engineAnalyze" | "engineStop"
   > = api,
 ) {
+  if (validateFen(fen).ok) {
+    const chess = new Chess(fen);
+    if (chess.isGameOver()) {
+      onChange({
+        fen,
+        status: "",
+        analysis: {
+          fen,
+          variations: [
+            {
+              rank: 1,
+              depth: 0,
+              scoreType: chess.isCheckmate() ? "mate" : "cp",
+              scoreValue: 0,
+              pv: [],
+            },
+          ],
+        },
+      });
+      return () => {};
+    }
+  }
   let active = true;
   let started = false;
   let finished = false;
@@ -27,7 +51,7 @@ export function startPositionAnalysis(
       try {
         const [path, depth] = await Promise.all([
           engineApi.getSetting("engine_path"),
-          engineApi.getSetting("engine_depth"),
+          getEngineDepth("position", engineApi),
         ]);
         if (!active) return;
         if (!path) {
@@ -38,13 +62,14 @@ export function startPositionAnalysis(
         const result = await engineApi.engineAnalyze(
           path,
           fen,
-          Number(depth ?? 14),
+          depth,
           requestId,
           (update) => {
             if (!active || finished || update.fen !== fen) return;
             analysis = update;
             onChange({ fen, analysis, status: "分析中…" });
           },
+          3,
         );
         finished = true;
         if (active && result.fen === fen) {

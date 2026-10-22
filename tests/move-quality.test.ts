@@ -67,8 +67,8 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("复盘双方招法等级", () => {
   for (const side of ["white", "black"] as const) {
-    it.each([0, 30])(
-      `${side} 接近最佳的招法损失 %i 厘兵标为 Good`,
+    it.each([-30, 0, 30])(
+      `${side} 非首选招法损失 %i 厘兵不标 Good`,
       async (loss) => {
         const move = moveFor(side),
           t = setup(move);
@@ -77,7 +77,7 @@ describe("复盘双方招法等级", () => {
         await flush();
         expect(t.changes[0].category).toBeNull();
         expect(t.changes.at(-1)).toMatchObject({
-          category: "Good",
+          category: null,
           candidate: null,
           status: "",
         });
@@ -86,7 +86,7 @@ describe("复盘双方招法等级", () => {
         ).toBeNull();
       },
     );
-    it(`${side} 高于 Good 阈值但低于失误阈值时不误标`, async () => {
+    it(`${side} 非首选且低于失误阈值时不标记`, async () => {
       const move = moveFor(side),
         t = setup(move);
       t.after.variations[0].scoreValue = side === "white" ? -31 : 31;
@@ -96,6 +96,20 @@ describe("复盘双方招法等级", () => {
         category: null,
         candidate: null,
         status: "",
+      });
+    });
+    it(`${side} 实战招法即使在第二推荐且同分也不标 Good`, () => {
+      const move = moveFor(side),
+        before = analysis(move.fenBefore, 0),
+        after = analysis(move.fenAfter, 0);
+      before.variations.push({
+        ...before.variations[0],
+        rank: 2,
+        pv: [move.uci],
+      });
+      expect(evaluateMoveQuality(move, side, before, after)).toEqual({
+        category: null,
+        candidate: null,
       });
     });
     it(`${side} 引擎首选招法标为 Good`, () => {

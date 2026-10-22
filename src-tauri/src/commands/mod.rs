@@ -158,32 +158,64 @@ pub async fn engine_analyze(
     fen: String,
     depth: u32,
     request_id: Option<String>,
+    multipv: Option<u32>,
     on_update: tauri::ipc::Channel<crate::engine::Analysis>,
 ) -> Result<crate::engine::Analysis, String> {
     crate::engine::validate(&path)?;
     let depth = depth.clamp(4, 30);
+    let multipv = multipv.unwrap_or(1);
+    if !(1..=crate::engine::MAX_MULTIPV).contains(&multipv) {
+        return Err("MultiPV必须介于1和3之间".into());
+    }
     let version = std::fs::metadata(&path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs().to_string())
         .unwrap_or_default();
-    if let Some(cached) = repository::engine_cache_get(&*db(&state)?, &fen, &path, &version, depth)?
+    if let Some(cached) =
+        repository::engine_cache_get(&*db(&state)?, &fen, &path, &version, depth, multipv)?
     {
         return Ok(cached);
     }
-    let result = crate::engine::analyze(
+    // Reuse a shallow checkpoint immediately while continuing toward the requested depth.
+    let checkpoint =
+        repository::engine_cache_get(&*db(&state)?, &fen, &path, &version, 4, multipv)?;
+    let mut reported_depth = checkpoint
+        .as_ref()
+        .map(|a| a.variations[0].depth)
+        .unwrap_or(0);
+    if let Some(checkpoint) = checkpoint {
+        let _ = on_update.send(checkpoint);
+    }
+    let options = {
+        let database = db(&state)?;
+        let threads = repository::get_setting(&database, "engine_threads")?;
+        let hash_mb = repository::get_setting(&database, "engine_hash_mb")?;
+        crate::engine::EngineOptions::from_settings(threads.as_deref(), hash_mb.as_deref())?
+    };
+    let result = crate::engine::analyze_with_options(
         &manager,
         &path,
         &fen,
         depth,
+        multipv,
+        options,
         request_id.as_deref(),
         |analysis| {
-            let _ = on_update.send(analysis);
+            let actual_depth = analysis.variations[0].depth;
+            if actual_depth > reported_depth {
+                reported_depth = actual_depth;
+                // Every checkpoint is stored at its actual depth, never as a completed target.
+                if let Ok(db) = db(&state) {
+                    let _ = repository::engine_cache_save(&db, &path, &version, multipv, &analysis);
+                }
+                let _ = on_update.send(analysis);
+            }
         },
     )
     .await?;
-    repository::engine_cache_save(&*db(&state)?, &path, &version, &result)?;
+    repository::engine_cache_save(&*db(&state)?, &path, &version, multipv, &result)?;
     Ok(result)
 }
 #[tauri::command]

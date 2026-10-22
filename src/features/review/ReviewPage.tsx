@@ -198,10 +198,7 @@ export default function ReviewPage() {
           <Heading as="h1" size="8">
             今日训练
           </Heading>
-          <p>
-            到期 {queue.length} 道 ·
-            拖动棋子，或依次点击起点和终点走棋；多步题会自动走出对手应手。
-          </p>
+          <p>到期 {queue.length} 题</p>
         </Box>
       </Flex>
       <DueForecast refreshKey={forecastRefresh} />

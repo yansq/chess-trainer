@@ -1092,11 +1092,12 @@ pub fn engine_cache_get(
     path: &str,
     version: &str,
     depth: u32,
+    multipv: u32,
 ) -> Result<Option<crate::engine::Analysis>, String> {
-    let config = format!("multipv={}", crate::engine::MULTIPV);
+    let config = format!("multipv={multipv};format=2");
     let json: Option<String> = db
         .query_row(
-            "SELECT principal_variation FROM engine_analyses WHERE fen=?1 AND engine_name=?2 AND engine_version=?3 AND analysis_config=?4 AND depth=?5",
+            "SELECT principal_variation FROM engine_analyses WHERE fen=?1 AND engine_name=?2 AND engine_version=?3 AND analysis_config=?4 AND depth>=?5 ORDER BY depth DESC LIMIT 1",
             params![fen, path, version, config, depth],
             |r| r.get(0),
         )
@@ -1113,10 +1114,11 @@ pub fn engine_cache_save(
     db: &Connection,
     path: &str,
     version: &str,
+    multipv: u32,
     a: &crate::engine::Analysis,
 ) -> Result<(), String> {
     let variations = serde_json::to_string(&a.variations).map_err(err)?;
-    let config = format!("multipv={}", crate::engine::MULTIPV);
+    let config = format!("multipv={multipv};format=2");
     db.execute("INSERT OR REPLACE INTO engine_analyses(fen,engine_name,engine_version,analysis_config,depth,score_type,score_value,principal_variation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![a.fen,path,version,config,a.variations[0].depth,a.variations[0].score_type,a.variations[0].score_value,variations]).map_err(err)?;
     Ok(())
 }
@@ -1129,7 +1131,7 @@ mod persistence_test {
         crate::db::migrations::migrate(&db).unwrap();
         let fen = "start";
         db.execute("INSERT INTO engine_analyses(fen,engine_name,engine_version,analysis_config,depth,score_type,score_value,principal_variation) VALUES ('start','engine','v1','multipv=1',12,'cp',42,'[\"e2e4\"]')", []).unwrap();
-        assert!(engine_cache_get(&db, fen, "engine", "v1", 12)
+        assert!(engine_cache_get(&db, fen, "engine", "v1", 12, 3)
             .unwrap()
             .is_none());
         let variations = [
@@ -1141,14 +1143,86 @@ mod persistence_test {
         .map(|line| crate::engine::parse_info(line, "8/8/8/8/8/8/8/8 w - - 0 1").unwrap())
         .collect();
         let analysis = crate::engine::Analysis::from_variations(fen, variations).unwrap();
-        engine_cache_save(&db, "engine", "v1", &analysis).unwrap();
-        let cached = engine_cache_get(&db, fen, "engine", "v1", 12)
+        engine_cache_save(&db, "engine", "v1", 3, &analysis).unwrap();
+        let cached = engine_cache_get(&db, fen, "engine", "v1", 12, 3)
             .unwrap()
             .unwrap();
         assert_eq!(
-            serde_json::to_value(cached).unwrap(),
-            serde_json::to_value(analysis).unwrap()
+            serde_json::to_value(&cached).unwrap(),
+            serde_json::to_value(&analysis).unwrap()
         );
+        assert!(engine_cache_get(&db, fen, "engine", "v1", 12, 1)
+            .unwrap()
+            .is_none());
+        let single =
+            crate::engine::Analysis::from_variations(fen, vec![analysis.variations[0].clone()])
+                .unwrap();
+        engine_cache_save(&db, "engine", "v1", 1, &single).unwrap();
+        assert_eq!(
+            engine_cache_get(&db, fen, "engine", "v1", 12, 1)
+                .unwrap()
+                .unwrap()
+                .variations
+                .len(),
+            1
+        );
+        assert_eq!(
+            engine_cache_get(&db, fen, "engine", "v1", 12, 3)
+                .unwrap()
+                .unwrap()
+                .variations
+                .len(),
+            3
+        );
+    }
+    #[test]
+    fn engine_cache_reuses_deeper_results_but_isolates_engine_and_multipv() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let fen = "position";
+        let analysis = |depth| {
+            crate::engine::Analysis::from_variations(
+                fen,
+                vec![crate::engine::Variation {
+                    rank: 1,
+                    depth,
+                    score_type: "cp".into(),
+                    score_value: 42,
+                    pv: vec!["e2e4".into()],
+                }],
+            )
+            .unwrap()
+        };
+        engine_cache_save(&db, "engine", "v1", 1, &analysis(16)).unwrap();
+        assert!(engine_cache_get(&db, fen, "engine", "v1", 22, 1)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            engine_cache_get(&db, fen, "engine", "v1", 4, 1)
+                .unwrap()
+                .unwrap()
+                .variations[0]
+                .depth,
+            16
+        );
+        engine_cache_save(&db, "engine", "v1", 1, &analysis(24)).unwrap();
+        assert_eq!(
+            engine_cache_get(&db, fen, "engine", "v1", 22, 1)
+                .unwrap()
+                .unwrap()
+                .variations[0]
+                .depth,
+            24
+        );
+        assert!(engine_cache_get(&db, fen, "engine", "v2", 22, 1)
+            .unwrap()
+            .is_none());
+        assert!(engine_cache_get(&db, fen, "other", "v1", 22, 1)
+            .unwrap()
+            .is_none());
+        assert!(engine_cache_get(&db, fen, "engine", "v1", 22, 3)
+            .unwrap()
+            .is_none());
     }
     #[test]
     fn note_survives_reopen() {

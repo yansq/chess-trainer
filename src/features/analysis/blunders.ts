@@ -49,7 +49,7 @@ export function classifyMove(
 }
 
 // Display ratings are separate from mistake candidates used to create puzzles.
-// Small losses use the same evaluation model as the existing mistake ratings.
+// Good is reserved for the engine's first recommended move.
 export function evaluateMoveQuality(
   move: Move,
   side: "white" | "black",
@@ -68,9 +68,8 @@ export function evaluateMoveQuality(
   const candidate = classifyMove(move, side, before, after, thresholds);
   if (candidate) return { candidate, category: candidate.category };
   const bestMove = before.variations[0].pv[0];
-  const loss = winChance(before, side) - winChance(after, side);
   return {
     candidate: null,
-    category: bestMove === move.uci || loss <= 0.05 ? "Good" : null,
+    category: bestMove === move.uci ? "Good" : null,
   };
 }

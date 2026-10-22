@@ -45,6 +45,7 @@ export default function NotePanel({
       {editing ? (
         <>
           <TextArea
+            autoFocus
             className="m-1.5 block min-h-9 w-note-field flex-1 resize-none leading-5"
             rows={2}
             value={draft}

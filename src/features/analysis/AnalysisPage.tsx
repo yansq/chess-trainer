@@ -1,3 +1,4 @@
+import { getEngineDepth } from "./engine-settings";
 import {
   Box,
   Button,
@@ -42,6 +43,8 @@ import { uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound, playSound } from "../../shared/audio/move-sound";
 import { classifyMove, type Candidate } from "./blunders";
 import NotePanel from "./NotePanel";
+import EvaluationBar from "./EvaluationBar";
+import { positionEvaluation } from "./evaluation";
 import {
   qualityBadges,
   startMoveQualityAnalysis,
@@ -130,13 +133,13 @@ export default function AnalysisPage() {
   const gameId = game?.id;
   const gameMoves = game?.moves;
   useEffect(() => {
-    if (!engineEnabled || !gameId || !gameMoves) return;
+    if (!gameId || !gameMoves) return;
     return startGameAnalysis(
       gameMoves,
       gameMoves[0]?.fenBefore ?? new Chess().fen(),
       (result) => setGameAnalysis({ ...result, gameId }),
     );
-  }, [gameId, gameMoves, analysisRetry, engineEnabled]);
+  }, [gameId, gameMoves, analysisRetry]);
   const batchGeneration = useRef(0);
   const batchRequest = useRef<string | null>(null);
   const cancelBatch = useCallback(() => {
@@ -209,18 +212,12 @@ export default function AnalysisPage() {
   const fen = currentMove?.fenAfter ?? review.initialFen;
   const inBranch = !!currentMove && currentMove.sourceMoveId === null;
   const preanalysis = gameAnalysis?.gameId === game?.id ? gameAnalysis : null;
-  const engine = inBranch
-    ? positionAnalysis?.fen === fen
-      ? positionAnalysis.analysis
-      : null
-    : (preanalysis?.positions[fen] ?? null);
-  const engineStatus = inBranch
-    ? positionAnalysis?.fen === fen
-      ? positionAnalysis.status
-      : "分析中…"
-    : engine
-      ? ""
-      : (preanalysis?.status ?? "准备整局预分析…");
+  const currentPosition =
+    positionAnalysis?.fen === fen ? positionAnalysis : null;
+  const engine =
+    currentPosition?.analysis ?? preanalysis?.positions[fen] ?? null;
+  const evaluation = positionEvaluation(fen, engine);
+  const engineStatus = currentPosition?.status ?? "分析中…";
   const lineLength = reviewLineEnd(review)?.ply ?? 0;
   const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
@@ -245,9 +242,9 @@ export default function AnalysisPage() {
     changeReview(navigateReview(review, direction));
   }
   useEffect(() => {
-    if (engineEnabled && inBranch)
+    if (engineEnabled && gameId)
       return startPositionAnalysis(fen, setPositionAnalysis);
-  }, [fen, inBranch, engineEnabled]);
+  }, [fen, gameId, engineEnabled]);
   useEffect(() => {
     if (
       !engineEnabled ||
@@ -348,15 +345,13 @@ export default function AnalysisPage() {
     setCandidates([]);
     setBatchProgress("准备分析…");
     try {
-      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all(
-        [
-          "engine_path",
-          "engine_depth",
-          "loss_inaccuracy",
-          "loss_mistake",
-          "loss_blunder",
-        ].map((key) => api.getSetting(key)),
-      );
+      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all([
+        api.getSetting("engine_path"),
+        getEngineDepth("preanalysis", api),
+        api.getSetting("loss_inaccuracy"),
+        api.getSetting("loss_mistake"),
+        api.getSetting("loss_blunder"),
+      ]);
       if (cancelled()) return;
       if (!path) {
         setMessage("请先在设置中配置 Stockfish");
@@ -375,7 +370,7 @@ export default function AnalysisPage() {
           return await api.engineAnalyze(
             path,
             position,
-            Number(depth ?? 14),
+            Number(depth),
             requestId,
           );
         } finally {
@@ -550,17 +545,6 @@ export default function AnalysisPage() {
             <ArrowLeft size={14} />
             返回对局列表
           </Button>
-          <Text as="label" size="2">
-            <Flex align="center" gap="2">
-              引擎
-              <Switch
-                size="1"
-                aria-label="启用引擎分析"
-                checked={engineEnabled}
-                onCheckedChange={changeEngineEnabled}
-              />
-            </Flex>
-          </Text>
           <Button
             size="1"
             variant="soft"
@@ -572,70 +556,81 @@ export default function AnalysisPage() {
         </Flex>
       </Flex>
       <Box className="mb-2 h-7 shrink-0" role="status" aria-live="polite">
-        {message && (
+        {(message || quality?.status) && (
           <Box className="h-full overflow-auto rounded-md border border-notice-edge bg-notice px-3 py-1 text-xs text-notice-ink">
-            {message}
+            {message || quality?.status}
           </Box>
         )}
       </Box>
       <Grid gap="4" className="min-h-0 flex-1 grid-cols-analysis">
         <section className="grid min-h-0 min-w-0 grid-rows-analysis gap-3">
           <Box className="relative min-h-0 min-w-0 container-size">
-            <Box className="mx-auto w-analysis-board">
-              <Box className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
-                <Chessboard
-                  options={{
-                    position: fen,
-                    boardOrientation: flipped ? "black" : "white",
-                    allowDragging: true,
-                    dragActivationDistance: 5,
-                    canDragPiece: ({ piece }) =>
-                      piece.pieceType[0] === fen.split(" ")[1],
-                    onPieceDrag: () => setSelectedSquare(null),
-                    onPieceDrop: ({ sourceSquare, targetSquare }) =>
-                      targetSquare
-                        ? playMove(sourceSquare, targetSquare)
-                        : false,
-                    onSquareClick: ({ square }) => clickSquare(square),
-                    squareStyles: selected
-                      ? {
-                          [selected]: {
-                            backgroundColor: "var(--color-board-selected)",
-                          },
-                        }
-                      : {},
-                    squareRenderer: ({ square, children }) => (
-                      <Box
-                        className={`relative h-full w-full ${selected === square ? "bg-board-selected" : ""}`}
-                        title={
-                          square === markedSquare && badge
-                            ? `${badge.label} · ${quality?.category}`
-                            : undefined
-                        }
-                      >
-                        {children}
-                        {square === markedSquare && badge && (
-                          <span
-                            className={` pointer-events-none absolute right-0.5 top-0.5 z-10 flex size-move-badge items-center justify-center rounded-full text-move-badge font-extrabold leading-none shadow-md ring-1 ring-black/20 ${badge.color}`}
-                            aria-label={`${badge.label}：${currentMove?.san}`}
-                            data-square={square}
-                            data-category={quality?.category}
-                          >
-                            {badge.symbol}
-                          </span>
-                        )}
-                      </Box>
-                    ),
-                    boardStyle: { borderRadius: 4 },
-                    darkSquareStyle: {
-                      backgroundColor: "var(--color-board-dark)",
-                    },
-                    lightSquareStyle: {
-                      backgroundColor: "var(--color-board-light)",
-                    },
-                  }}
-                />
-              </Box>
+            <Box
+              className={`mx-auto ${engineEnabled ? "w-analysis-board-evaluation" : "w-analysis-board"}`}
+            >
+              <Flex align="stretch" gap="2">
+                {engineEnabled && (
+                  <EvaluationBar
+                    fen={fen}
+                    analysis={engine}
+                    flipped={flipped}
+                  />
+                )}
+                <Box className="min-w-0 flex-1 overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
+                  <Chessboard
+                    options={{
+                      position: fen,
+                      boardOrientation: flipped ? "black" : "white",
+                      allowDragging: true,
+                      dragActivationDistance: 5,
+                      canDragPiece: ({ piece }) =>
+                        piece.pieceType[0] === fen.split(" ")[1],
+                      onPieceDrag: () => setSelectedSquare(null),
+                      onPieceDrop: ({ sourceSquare, targetSquare }) =>
+                        targetSquare
+                          ? playMove(sourceSquare, targetSquare)
+                          : false,
+                      onSquareClick: ({ square }) => clickSquare(square),
+                      squareStyles: selected
+                        ? {
+                            [selected]: {
+                              backgroundColor: "var(--color-board-selected)",
+                            },
+                          }
+                        : {},
+                      squareRenderer: ({ square, children }) => (
+                        <Box
+                          className={`relative h-full w-full ${selected === square ? "bg-board-selected" : ""}`}
+                          title={
+                            square === markedSquare && badge
+                              ? `${badge.label} · ${quality?.category}`
+                              : undefined
+                          }
+                        >
+                          {children}
+                          {square === markedSquare && badge && (
+                            <span
+                              className={` pointer-events-none absolute right-0.5 top-0.5 z-10 flex size-move-badge items-center justify-center rounded-full text-move-badge font-extrabold leading-none shadow-md ring-1 ring-black/20 ${badge.color}`}
+                              aria-label={`${badge.label}：${currentMove?.san}`}
+                              data-square={square}
+                              data-category={quality?.category}
+                            >
+                              {badge.symbol}
+                            </span>
+                          )}
+                        </Box>
+                      ),
+                      boardStyle: { borderRadius: 4 },
+                      darkSquareStyle: {
+                        backgroundColor: "var(--color-board-dark)",
+                      },
+                      lightSquareStyle: {
+                        backgroundColor: "var(--color-board-light)",
+                      },
+                    }}
+                  />
+                </Box>
+              </Flex>
               {promotion?.fen === fen && (
                 <Flex
                   wrap="wrap"
@@ -731,29 +726,16 @@ export default function AnalysisPage() {
                 >
                   <RotateCcw />
                 </IconButton>
-              </Flex>
-              <Flex align="center" justify="end" mt="2" gap="2">
-                {quality?.status && (
-                  <span
-                    role="status"
-                    className="min-w-0 truncate text-caption text-muted"
-                    title={quality.status}
-                  >
-                    {quality.status}
-                  </span>
-                )}
-                <Button
+                <IconButton
                   size="1"
-                  variant="soft"
-                  className="min-w-22.5 shrink-0"
+                  variant="ghost"
+                  className="[&_svg]:size-4"
                   onClick={() => void copyFen()}
                   aria-label="复制当前局面 FEN"
+                  title={copiedFen === fen ? "已复制 FEN" : "复制 FEN"}
                 >
-                  {copiedFen === fen ? <Check size={14} /> : <Copy size={14} />}
-                  <span aria-live="polite">
-                    {copiedFen === fen ? "已复制" : "复制 FEN"}
-                  </span>
-                </Button>
+                  {copiedFen === fen ? <Check /> : <Copy />}
+                </IconButton>
               </Flex>
             </Box>
           </Box>
@@ -805,18 +787,37 @@ export default function AnalysisPage() {
             gap="3"
             className={activeTool === "position" ? "min-h-0 flex-1" : "hidden"}
           >
-            {engineEnabled && (
-              <Card className="shrink-0 overflow-hidden p-0">
-                <Box
-                  px="3"
-                  py="2"
-                  className="border-b border-panel-edge text-body-sm font-bold"
-                >
-                  Stockfish 分析{" "}
-                  <span className="text-xs font-normal text-engine-muted">
-                    {engineStatus && engine ? ` · ${engineStatus}` : ""}
+            <Card className="shrink-0 overflow-hidden p-0">
+              <Flex
+                align="center"
+                gap="2"
+                px="3"
+                py="2"
+                className="border-b border-panel-edge text-body-sm font-bold"
+              >
+                <span className="shrink-0">Stockfish 分析</span>
+                <Switch
+                  size="1"
+                  aria-label="启用引擎分析"
+                  checked={engineEnabled}
+                  onCheckedChange={changeEngineEnabled}
+                />
+                {engineEnabled && (
+                  <span
+                    className="shrink-0 tabular-nums text-accent-ink"
+                    aria-label="当前局面评分"
+                    title={evaluation?.description ?? "当前局面暂无引擎评分"}
+                  >
+                    {evaluation?.label ?? "—"}
                   </span>
-                </Box>
+                )}
+                {engineEnabled && engineStatus && engine && (
+                  <span className="min-w-0 truncate text-xs font-normal text-engine-muted">
+                    {engineStatus}
+                  </span>
+                )}
+              </Flex>
+              {engineEnabled && (
                 <Box
                   p="2"
                   className="h-47 overflow-auto overscroll-contain text-body-sm"
@@ -880,8 +881,8 @@ export default function AnalysisPage() {
                     </span>
                   )}
                 </Box>
-              </Card>
-            )}
+              )}
+            </Card>
             <MoveList
               tree={review}
               qualities={qualities}

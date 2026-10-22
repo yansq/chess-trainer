@@ -1,3 +1,4 @@
+import { getEngineDepth } from "./engine-settings";
 import { Chess } from "chess.js";
 import { api, type EngineAnalysis } from "../../shared/api";
 import type { Move } from "../../shared/types";
@@ -41,15 +42,13 @@ export function startGameAnalysis(
   report();
   void (async () => {
     try {
-      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all(
-        [
-          "engine_path",
-          "engine_depth",
-          "loss_inaccuracy",
-          "loss_mistake",
-          "loss_blunder",
-        ].map((key) => engineApi.getSetting(key)),
-      );
+      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all([
+        engineApi.getSetting("engine_path"),
+        getEngineDepth("preanalysis", engineApi),
+        engineApi.getSetting("loss_inaccuracy"),
+        engineApi.getSetting("loss_mistake"),
+        engineApi.getSetting("loss_blunder"),
+      ]);
       if (!active) return;
       if (!path) {
         report({ status: "请在设置中配置 Stockfish 路径" });
@@ -71,7 +70,7 @@ export function startGameAnalysis(
             variations: [
               {
                 rank: 1,
-                depth: Number(depth ?? 14),
+                depth: Number(depth),
                 scoreType: chess.isCheckmate() ? "mate" : "cp",
                 scoreValue: 0,
                 pv: [],
@@ -85,8 +84,10 @@ export function startGameAnalysis(
         const result = await engineApi.engineAnalyze(
           path!,
           fen,
-          Number(depth ?? 14),
+          Number(depth),
           requestId,
+          undefined,
+          1,
         );
         requestId = null;
         if (!active) throw new Error("已取消");

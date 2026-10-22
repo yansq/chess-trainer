@@ -1,3 +1,4 @@
+import { getEngineDepth } from "./engine-settings";
 import { api, type EngineAnalysis } from "../../shared/api";
 import type { Move } from "../../shared/types";
 import { evaluateMoveQuality, type Candidate, type Category } from "./blunders";
@@ -63,15 +64,13 @@ export function startMoveQualityAnalysis(
   report(null, "评估招法…");
   void (async () => {
     try {
-      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all(
-        [
-          "engine_path",
-          "engine_depth",
-          "loss_inaccuracy",
-          "loss_mistake",
-          "loss_blunder",
-        ].map((key) => engineApi.getSetting(key)),
-      );
+      const [path, depth, inaccuracy, mistake, blunder] = await Promise.all([
+        engineApi.getSetting("engine_path"),
+        getEngineDepth("position", engineApi),
+        engineApi.getSetting("loss_inaccuracy"),
+        engineApi.getSetting("loss_mistake"),
+        engineApi.getSetting("loss_blunder"),
+      ]);
       if (!active) return;
       if (!path || after.fen !== move.fenAfter) {
         report(null, "");
@@ -81,7 +80,7 @@ export function startMoveQualityAnalysis(
       const before = await engineApi.engineAnalyze(
         path,
         move.fenBefore,
-        Number(depth ?? 14),
+        Number(depth),
         requestId,
       );
       pending = false;

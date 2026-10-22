@@ -39,9 +39,13 @@ function setup() {
         fen: string,
         _depth: number,
         _requestId?: string,
+        _onUpdate?: (analysis: EngineAnalysis) => void,
+        _multipv?: 1 | 3,
       ): Promise<EngineAnalysis> => {
         void _depth;
         void _requestId;
+        void _onUpdate;
+        void _multipv;
         return result(fen);
       },
     ),
@@ -62,6 +66,7 @@ describe("整局顺序预分析", () => {
     const stop = startGameAnalysis(moves, fens[0], changed, api);
     await settle();
     expect(api.engineAnalyze.mock.calls.map((c) => c[1])).toEqual(fens);
+    expect(api.engineAnalyze.mock.calls.every((c) => c[5] === 1)).toBe(true);
     const last = states.at(-1)!;
     expect(last.completed).toBe(6);
     expect(last.status).toBe("整局分析完成 6 / 6");
@@ -80,18 +85,21 @@ describe("整局顺序预分析", () => {
     stop();
     expect(api.engineStop).not.toHaveBeenCalled();
   });
-  it("整局预分析也自动发布 Good，且不作为失误题目候选", async () => {
+  it("整局预分析仅对首选招法发布 Good，同分非首选保持无标记", async () => {
     const { api, states, changed } = setup();
     api.engineAnalyze.mockImplementation(async (_p, fen) => {
       const a = result(fen);
       a.variations[0].scoreValue = 0;
+      const index = fens.indexOf(fen);
+      if (index % 4 < 2 && moves[index])
+        a.variations[0].pv = [moves[index].uci];
       return a;
     });
     startGameAnalysis(moves, fens[0], changed, api);
     await settle();
     expect(
       Object.values(states.at(-1)!.qualities).map((q) => q.category),
-    ).toEqual(Array(6).fill("Good"));
+    ).toEqual(["Good", "Good", null, null, "Good", "Good"]);
     expect(
       Object.values(states.at(-1)!.qualities).every(
         (q) => q.candidate === null,
@@ -104,7 +112,9 @@ describe("整局顺序预分析", () => {
       async (k) =>
         ({
           engine_path: "/custom",
-          engine_depth: "18",
+          engine_depth: "22",
+          engine_preanalysis_depth: "18",
+          engine_position_depth: "24",
           loss_inaccuracy: "0.9",
           loss_mistake: "0.95",
           loss_blunder: "0.99",

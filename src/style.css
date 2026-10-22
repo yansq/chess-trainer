@@ -29,6 +29,8 @@
   --color-board-dark: #65847d;
   --color-board-light: #e8dfca;
   --color-board-selected: #b6a45f;
+  --color-evaluation-white: #eeeee9;
+  --color-evaluation-black: #273033;
 
   /* Shared application roles. */
   --color-sidebar-edge: #283739;
@@ -155,7 +157,11 @@
 }
 
 @utility w-analysis-board {
-  width: min(100cqw, calc(100cqh - 76px));
+  width: min(100cqw, calc(100cqh - 36px));
+}
+
+@utility w-analysis-board-evaluation {
+  width: min(100cqw, calc(100cqh - 36px + 20px));
 }
 
 @utility size-move-badge {

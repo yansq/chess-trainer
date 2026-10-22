@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Chess } from "chess.js";
 import { startPositionAnalysis } from "../src/features/analysis/engine-analysis";
 import type { EngineAnalysis } from "../src/shared/api";
 
@@ -36,6 +37,7 @@ function setup() {
         depth: number,
         requestId?: string,
         onUpdate?: (a: EngineAnalysis) => void,
+        multipv?: 1 | 3,
       ) => Promise<EngineAnalysis>
     >(() => pending.promise),
     engineStop: vi.fn<(requestId?: string) => Promise<void>>(async () => {}),
@@ -47,6 +49,25 @@ describe("局面实时分析", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it("将死终局直接返回确定评分，不启动候选搜索", () => {
+    const { api, changed } = setup();
+    const chess = new Chess();
+    for (const move of ["f3", "e5", "g4", "Qh4#"]) chess.move(move);
+    const stop = startPositionAnalysis(chess.fen(), changed, api);
+    expect(changed).toHaveBeenLastCalledWith({
+      fen: chess.fen(),
+      status: "",
+      analysis: {
+        fen: chess.fen(),
+        variations: [
+          { rank: 1, depth: 0, scoreType: "mate", scoreValue: 0, pv: [] },
+        ],
+      },
+    });
+    expect(api.getSetting).not.toHaveBeenCalled();
+    expect(api.engineAnalyze).not.toHaveBeenCalled();
+    stop();
+  });
   it("快速切换只分析最后停留的局面，保留设定深度", async () => {
     const { api, changed } = setup();
     const first = startPositionAnalysis("A", changed, api);
@@ -63,8 +84,24 @@ describe("局面实时分析", () => {
       "C",
       14,
     ]);
+    expect(api.engineAnalyze.mock.calls[0][5]).toBe(3);
     expect(api.engineStop).not.toHaveBeenCalled();
     last();
+  });
+  it("当前局面使用局面深度而非预分析或旧深度", async () => {
+    const { api, changed } = setup();
+    const values: Record<string, string> = {
+      engine_path: "/stockfish",
+      engine_position_depth: "22",
+      engine_preanalysis_depth: "16",
+      engine_depth: "18",
+    };
+    api.getSetting.mockImplementation(async (key) => values[key] ?? null);
+    const stop = startPositionAnalysis("A", changed, api);
+    await vi.advanceTimersByTimeAsync(180);
+    expect(api.engineAnalyze.mock.calls[0][2]).toBe(22);
+    expect(api.engineAnalyze.mock.calls[0][5]).toBe(3);
+    stop();
   });
   it("分析完成前显示浅层结果，完成后忽略迟到的进度", async () => {
     const { api, pending, changed } = setup();

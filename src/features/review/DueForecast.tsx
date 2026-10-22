@@ -37,7 +37,6 @@ export default function DueForecast({ refreshKey }: { refreshKey: number }) {
       className="gap-x-4 gap-y-1 text-xs"
       aria-label="未来三天到期题目"
     >
-      <span className="text-engine-muted">到期预告（累计）</span>
       {[1, 2, 3].map((day, index) => (
         <Box
           key={day}
@@ -50,7 +49,7 @@ export default function DueForecast({ refreshKey }: { refreshKey: number }) {
         >
           <span className="text-engine-muted">{day} 天后</span>
           <strong className="tabular-nums text-accent-ink">
-            {error ? "—" : (forecast?.counts[index] ?? "—")} 道
+            {error ? "—" : (forecast?.counts[index] ?? "—")} 题
           </strong>
         </Box>
       ))}

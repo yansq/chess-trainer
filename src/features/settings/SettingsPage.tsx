@@ -1,4 +1,8 @@
 import {
+  getEngineDepth,
+  normalizeEngineDepth,
+} from "../analysis/engine-settings";
+import {
   Box,
   Button,
   Callout,
@@ -17,7 +21,10 @@ export default function SettingsPage() {
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
   const [enginePath, setEnginePath] = useState("");
-  const [depth, setDepth] = useState(14);
+  const [preanalysisDepth, setPreanalysisDepth] = useState("14");
+  const [positionDepth, setPositionDepth] = useState("14");
+  const [threads, setThreads] = useState("4");
+  const [hashMb, setHashMb] = useState("256");
   const [thresholds, setThresholds] = useState({
     inaccuracy: 12,
     mistake: 25,
@@ -35,10 +42,21 @@ export default function SettingsPage() {
       .getSetting("engine_path")
       .then((v) => setEnginePath(v ?? "/opt/homebrew/bin/stockfish"))
       .catch(() => {});
-    api
-      .getSetting("engine_depth")
-      .then((v) => setDepth(Number(v ?? 14)))
-      .catch(() => {});
+    Promise.all([
+      api.getSetting("engine_threads"),
+      api.getSetting("engine_hash_mb"),
+    ])
+      .then(([threads, hashMb]) => {
+        setThreads(threads ?? "4");
+        setHashMb(hashMb ?? "256");
+      })
+      .catch((e) => setMessage(`引擎参数加载失败：${String(e)}`));
+    Promise.all([getEngineDepth("preanalysis"), getEngineDepth("position")])
+      .then(([preanalysis, position]) => {
+        setPreanalysisDepth(String(preanalysis));
+        setPositionDepth(String(position));
+      })
+      .catch((e) => setMessage(`分析深度加载失败：${String(e)}`));
     Promise.all(
       ["loss_inaccuracy", "loss_mistake", "loss_blunder"].map((k) =>
         api.getSetting(k),
@@ -87,12 +105,42 @@ export default function SettingsPage() {
   }
   async function saveEngine() {
     try {
+      if (
+        ![preanalysisDepth, positionDepth].every(
+          (value) =>
+            value.trim() !== "" &&
+            Number.isInteger(Number(value)) &&
+            Number(value) >= 4 &&
+            Number(value) <= 30,
+        )
+      )
+        throw new Error("分析深度须为 4～30 的整数");
+      if (
+        threads.trim() === "" ||
+        !Number.isInteger(Number(threads)) ||
+        Number(threads) < 1 ||
+        Number(threads) > 64
+      )
+        throw new Error("Threads 须为 1～64 的整数");
+      if (
+        hashMb.trim() === "" ||
+        !Number.isInteger(Number(hashMb)) ||
+        Number(hashMb) < 1 ||
+        Number(hashMb) > 4096
+      )
+        throw new Error("Hash 须为 1～4096 MB 的整数");
       await api.engineValidate(enginePath.trim());
       await api.setSetting("engine_path", enginePath.trim());
       await api.setSetting(
-        "engine_depth",
-        String(Math.max(4, Math.min(30, depth))),
+        "engine_preanalysis_depth",
+        String(normalizeEngineDepth(preanalysisDepth)),
       );
+      await api.setSetting(
+        "engine_position_depth",
+        String(normalizeEngineDepth(positionDepth)),
+      );
+      await api.setSetting("engine_threads", String(Number(threads)));
+      await api.setSetting("engine_hash_mb", String(Number(hashMb)));
       setMessage("引擎配置已保存");
     } catch (e) {
       setMessage(String(e));
@@ -198,15 +246,65 @@ export default function SettingsPage() {
           </Text>
           <Text size="2" as="label">
             <Flex direction="column" gap="2">
-              分析深度
+              预分析深度
               <TextField.Root
                 type="number"
                 min="4"
                 max="30"
-                value={depth}
-                onChange={(e) => setDepth(Number(e.target.value))}
+                value={preanalysisDepth}
+                onChange={(e) => setPreanalysisDepth(e.target.value)}
               />
             </Flex>
+          </Text>
+          <Text size="1" color="gray">
+            用于整局预分析和批量失误扫描。
+          </Text>
+          <Text size="2" as="label">
+            <Flex direction="column" gap="2">
+              局面分析深度
+              <TextField.Root
+                type="number"
+                min="4"
+                max="30"
+                step="1"
+                value={positionDepth}
+                onChange={(e) => setPositionDepth(e.target.value)}
+              />
+            </Flex>
+          </Text>
+          <Text size="1" color="gray">
+            用于当前局面的 3 条候选招法及试走分支评价。
+          </Text>
+          <Flex gap="3" wrap="wrap">
+            <Text size="2" as="label">
+              <Flex direction="column" gap="2">
+                Threads（线程数）
+                <TextField.Root
+                  type="number"
+                  min="1"
+                  max="64"
+                  step="1"
+                  value={threads}
+                  onChange={(e) => setThreads(e.target.value)}
+                />
+              </Flex>
+            </Text>
+            <Text size="2" as="label">
+              <Flex direction="column" gap="2">
+                Hash（MB）
+                <TextField.Root
+                  type="number"
+                  min="1"
+                  max="4096"
+                  step="1"
+                  value={hashMb}
+                  onChange={(e) => setHashMb(e.target.value)}
+                />
+              </Flex>
+            </Text>
+          </Flex>
+          <Text size="1" color="gray">
+            预分析和局面分析的每个引擎进程均使用此配置，两者可同时运行。保存后从下一次搜索起生效。
           </Text>
           <Flex>
             <Button onClick={() => void saveEngine()}>保存引擎配置</Button>
