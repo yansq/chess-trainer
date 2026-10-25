@@ -7,53 +7,28 @@ export function getMoveSoundType(san: string): MoveSoundType {
   return san.includes("x") ? "capture" : "move";
 }
 
-// Short, normalized samples keep each effect clear without stacking loud voices.
-export function synthesizeMoveSound(
-  type: MoveSoundType,
-  sampleRate: number,
-): Float32Array {
-  const duration = type === "check" ? 0.34 : type === "capture" ? 0.2 : 0.12;
-  const data = new Float32Array(Math.ceil(duration * sampleRate));
-  const taps =
-    type === "check" ? [0, 0.12] : type === "capture" ? [0, 0.055] : [0];
-  let seed = 12345;
-  for (const [tap, offset] of taps.entries()) {
-    const frequency =
-      type === "check"
-        ? [880, 1174.66][tap]
-        : type === "capture"
-          ? 230 + tap * 100
-          : 520;
-    const decay = type === "check" ? 0.055 : type === "capture" ? 0.025 : 0.02;
-    const start = Math.round(offset * sampleRate);
-    for (let i = start; i < data.length; i++) {
-      const time = (i - start) / sampleRate;
-      seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
-      const noise = seed / 2147483648;
-      const tone =
-        Math.sin(2 * Math.PI * frequency * time) +
-        0.35 * Math.sin(2 * Math.PI * frequency * 2.7 * time);
-      const envelope = Math.min(1, time / 0.002) * Math.exp(-time / decay);
-      data[i] += (tone + (type === "check" ? 0 : noise * 0.25)) * envelope;
-    }
-  }
-  const peak = data.reduce(
-    (maximum, value) => Math.max(maximum, Math.abs(value)),
-    0,
-  );
-  if (peak > 0) for (let i = 0; i < data.length; i++) data[i] *= 0.95 / peak;
-  return data;
-}
+// Vite emits these recordings into the application bundle for offline playback.
+const recordings: Record<MoveSoundType, string> = {
+  move: new URL("./samples/move.wav", import.meta.url).href,
+  capture: new URL("./samples/capture.wav", import.meta.url).href,
+  check: new URL("./samples/check.wav", import.meta.url).href,
+};
+
+// +1 dB; the loudest recording still has more than 1 dB of true-peak headroom.
+const playbackGain = 10 ** (1 / 20);
 
 let context: AudioContext | undefined;
 let master: GainNode | undefined;
 let active: AudioBufferSourceNode | undefined;
-const buffers = new Map<MoveSoundType, AudioBuffer>();
+const buffers = new Map<MoveSoundType, Promise<AudioBuffer>>();
+let playbackRequest = 0;
 
 useSoundSettings.subscribe(({ enabled, volume }) => {
+  // Muting also invalidates sounds still waiting for local loading/decoding.
+  if (!enabled || volume === 0) playbackRequest++;
   if (context && context.state !== "closed" && master) {
     master.gain.setTargetAtTime(
-      enabled ? 0.8 * (volume / 100) ** 1.4 : 0,
+      enabled ? playbackGain * (volume / 100) ** 1.4 : 0,
       context.currentTime,
       0.01,
     );
@@ -61,6 +36,7 @@ useSoundSettings.subscribe(({ enabled, volume }) => {
 });
 
 export async function playSound(type: MoveSoundType): Promise<boolean> {
+  const request = ++playbackRequest;
   const settings = useSoundSettings.getState();
   if (!settings.enabled || settings.volume === 0) return false;
   try {
@@ -71,29 +47,51 @@ export async function playSound(type: MoveSoundType): Promise<boolean> {
       buffers.clear();
       active = undefined;
     }
-    if (context.state === "suspended") await context.resume();
-    // Settings may change while the audio device is waking up.
-    const { enabled, volume } = useSoundSettings.getState();
-    if (!enabled || volume === 0 || context.state !== "running") return false;
-    let buffer = buffers.get(type);
-    if (!buffer) {
-      const data = synthesizeMoveSound(type, context.sampleRate);
-      buffer = context.createBuffer(1, data.length, context.sampleRate);
-      buffer.getChannelData(0).set(data);
-      buffers.set(type, buffer);
+    const device = context;
+    if (device.state === "suspended") await device.resume();
+    if (request !== playbackRequest || device.state !== "running") return false;
+    let loading = buffers.get(type);
+    if (!loading) {
+      loading = fetch(recordings[type])
+        .then((response) => {
+          if (!response.ok) throw new Error("音效文件加载失败");
+          return response.arrayBuffer();
+        })
+        .then((bytes) => device.decodeAudioData(bytes));
+      buffers.set(type, loading);
+      const pending = loading;
+      void pending.catch(() => {
+        if (buffers.get(type) === pending) buffers.delete(type);
+      });
     }
+    const buffer = await loading;
+    // The user may navigate, mute or change volume while a recording loads.
+    const { enabled, volume } = useSoundSettings.getState();
+    if (
+      request !== playbackRequest ||
+      device !== context ||
+      device.state !== "running" ||
+      !enabled ||
+      volume === 0
+    )
+      return false;
     master!.gain.setValueAtTime(
-      0.8 * (volume / 100) ** 1.4,
-      context.currentTime,
+      playbackGain * (volume / 100) ** 1.4,
+      device.currentTime,
     );
     active?.stop();
-    active = context.createBufferSource();
-    active.buffer = buffer;
-    active.connect(master!);
-    active.start();
+    const source = device.createBufferSource();
+    source.buffer = buffer;
+    source.connect(master!);
+    source.onended = () => {
+      source.disconnect();
+      if (active === source) active = undefined;
+    };
+    active = source;
+    source.start();
     return true;
   } catch {
-    // An unavailable audio device must not interrupt a legal chess move.
+    // Audio failures must not interrupt a legal chess move; later calls can retry.
     return false;
   }
 }

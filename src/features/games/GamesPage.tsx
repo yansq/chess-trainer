@@ -9,7 +9,7 @@ import {
   Table,
   TextField,
 } from "@radix-ui/themes";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
@@ -42,17 +42,12 @@ export default function GamesPage() {
   const [busy, setBusy] = useState(false);
   const sync = useLichessSync();
   const refreshSync = sync.refresh;
-  const load = useCallback(
-    () =>
-      api
-        .listGames(filter)
-        .then(setPage)
-        .catch((e) => setMessage(String(e))),
-    [filter],
-  );
   useEffect(() => {
-    void load();
-  }, [load, sync.revision]);
+    api
+      .listGames(filter)
+      .then(setPage)
+      .catch((e) => setMessage(String(e)));
+  }, [filter, sync.revision]);
   useEffect(() => {
     void refreshSync();
   }, [refreshSync]);
@@ -64,7 +59,7 @@ export default function GamesPage() {
       const games = parsePgnCollection(text, "local", username ?? undefined);
       const added = await api.importGames(games);
       setMessage(`已读取 ${games.length} 局，新增 ${added} 局`);
-      await load();
+      setPage(await api.listGames(filter));
     } catch (e) {
       setMessage(`导入失败：${e}`);
     } finally {

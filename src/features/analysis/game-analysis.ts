@@ -70,7 +70,7 @@ export function startGameAnalysis(
             variations: [
               {
                 rank: 1,
-                depth: Number(depth),
+                depth: depth,
                 scoreType: chess.isCheckmate() ? "mate" : "cp",
                 scoreValue: 0,
                 pv: [],
@@ -84,7 +84,7 @@ export function startGameAnalysis(
         const result = await engineApi.engineAnalyze(
           path!,
           fen,
-          Number(depth),
+          depth,
           requestId,
           undefined,
           1,

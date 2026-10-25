@@ -80,7 +80,7 @@ export function startMoveQualityAnalysis(
       const before = await engineApi.engineAnalyze(
         path,
         move.fenBefore,
-        Number(depth),
+        depth,
         requestId,
       );
       pending = false;

@@ -252,7 +252,7 @@ export default function ReviewPage() {
             <Heading size="6" mt="2" mb="3">
               {current.title}
             </Heading>
-            <p>{current.description || "找到当前局面的最佳走法。"}</p>
+            <p>找到当前局面的最佳走法。</p>
             <Box role="status" aria-live="polite">
               {message && (
                 <Callout.Root size="1" className="my-4">
@@ -317,6 +317,7 @@ export default function ReviewPage() {
               <>
                 <Box className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
                   <strong>{correct ? "回答正确" : "本题答案"}</strong>
+                  {current.description && <p>{current.description}</p>}
                   <Box>
                     标准走法：
                     {current.expectedMoves

@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import type { GameImport, Move } from "../../shared/types";
+import type { GameImport, LichessExportGame, Move } from "../../shared/types";
 
 export function splitPgn(text: string): string[] {
   const normalized = text.replace(/\r\n/g, "\n").trim();
@@ -27,10 +27,20 @@ export function parsePgn(
   const headers = chess.header();
   const verbose = chess.history({ verbose: true });
   const site = headers.Site ?? "";
-  const externalGameId =
-    source === "lichess"
-      ? (site.match(/lichess\.org\/([a-zA-Z0-9]{8,12})/)?.[1] ?? null)
-      : null;
+  let externalGameId: string | null = null;
+  if (source === "lichess") {
+    const siteId = site.match(
+      /^https?:\/\/(?:www\.)?lichess\.org\/(?:game\/)?([a-zA-Z0-9]{8})(?:[a-zA-Z0-9]{4})?(?=[/?#]|$)/,
+    )?.[1];
+    const headerId = headers.GameId;
+    if (headerId && !/^[a-zA-Z0-9]{8}$/.test(headerId)) {
+      throw new Error("棋谱 GameId 无效");
+    }
+    if (headerId && siteId && headerId !== siteId) {
+      throw new Error("棋谱 GameId 与 Site 不一致");
+    }
+    externalGameId = headerId || siteId || null;
+  }
   const id =
     source === "lichess" && externalGameId
       ? `lichess:${externalGameId}`
@@ -105,4 +115,22 @@ export function parsePgnCollection(
   username?: string,
 ): GameImport[] {
   return splitPgn(text).map((p) => parsePgn(p, source, username));
+}
+
+export function parseLichessBatch(
+  batch: LichessExportGame[],
+  username: string,
+): GameImport[] {
+  return batch.map((record) => {
+    try {
+      const game = parsePgn(record.pgn, "lichess", username);
+      if (game.externalGameId !== record.id) {
+        throw new Error("棋谱 ID 不一致");
+      }
+      return game;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`对局 ${record.id} 解析失败：${message}`);
+    }
+  });
 }

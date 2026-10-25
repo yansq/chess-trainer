@@ -1,5 +1,6 @@
 import { Box, Button, Card, Flex, Grid } from "@radix-ui/themes";
 import { Fragment, useEffect, useRef } from "react";
+import { FileText } from "lucide-react";
 import { moveNumber, type ReviewMove, type ReviewTree } from "./review-tree";
 
 import { qualityBadges, type MoveQuality } from "./move-quality";
@@ -9,6 +10,7 @@ type Props = {
   analysisStatus?: string;
   onRetry?: () => void;
   qualities?: Record<string, MoveQuality>;
+  notes?: Record<string, string>;
   onSelect: (id: string | null) => void;
   onMainline: () => void;
 };
@@ -16,6 +18,7 @@ type Props = {
 export default function MoveList({
   tree,
   qualities = {},
+  notes = {},
   analysisStatus,
   onRetry,
   onSelect,
@@ -77,6 +80,16 @@ export default function MoveList({
         <span className="min-w-0 flex-1 truncate text-left" title={move.san}>
           {move.san}
         </span>
+        {notes[move.id]?.trim() && (
+          <span
+            role="img"
+            aria-label="有招法笔记"
+            title="有招法笔记"
+            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-note-badge px-0.5 text-eyebrow font-bold leading-none text-quality-ink"
+          >
+            <FileText className="size-2.5" strokeWidth={2.5} aria-hidden="true" />
+          </span>
+        )}
         <span
           className="inline-flex h-4 w-5 shrink-0 items-center justify-center"
           data-quality-slot

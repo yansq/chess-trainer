@@ -9,8 +9,11 @@ import {
   Text,
   Table,
   TextField,
+  Popover,
+  Button,
 } from "@radix-ui/themes";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { CalendarDays } from "lucide-react";
 import { api } from "../../shared/api";
 import type { OpeningStat, OpponentType } from "../../shared/types";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
@@ -28,9 +31,8 @@ export default function StatisticsPage() {
   const [to, setTo] = useState("");
   const [stats, setStats] = useState<OpeningStat[]>([]);
   const [error, setError] = useState("");
-  const families = useMemo(() => groupOpeningFamilies(stats), [stats]);
   const rows: (OpeningFamilyStat & { eco?: string })[] =
-    view === "family" ? families : stats;
+    view === "family" ? groupOpeningFamilies(stats) : stats;
   const isFamily = view === "family";
   const overall = stats.reduce(
     (sum, stat) => ({
@@ -119,16 +121,35 @@ export default function StatisticsPage() {
             { value: "classical", label: "Classical" },
           ]}
         />
-        <TextField.Root
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-        <TextField.Root
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-        />
+        {[
+          { label: "开始日期", value: from, setValue: setFrom },
+          { label: "结束日期", value: to, setValue: setTo },
+        ].map(({ label, value, setValue }) => (
+          <Popover.Root key={label}>
+            <Popover.Trigger>
+              <Button variant="surface" className="justify-start">
+                <CalendarDays size={14} />
+                {label}：{value || "不限"}
+              </Button>
+            </Popover.Trigger>
+            <Popover.Content size="1">
+              <Flex direction="column" gap="2">
+                <Text size="2">{label}</Text>
+                <TextField.Root
+                  type="date"
+                  aria-label={label}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                />
+                <Popover.Close>
+                  <Button size="1" variant="soft" onClick={() => setValue("")}>
+                    不限日期
+                  </Button>
+                </Popover.Close>
+              </Flex>
+            </Popover.Content>
+          </Popover.Root>
+        ))}
       </Card>
       <Grid
         columns={{ initial: "1", sm: "2" }}

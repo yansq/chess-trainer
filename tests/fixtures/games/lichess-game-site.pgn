@@ -1,0 +1,19 @@
+[Event "casual correspondence game"]
+[Site "https://lichess.org/game/fKi4wjFx"]
+[Date "2026.09.25"]
+[Round "-"]
+[White "lichess AI level 3"]
+[Black "CrownUpFish"]
+[Result "1-0"]
+[GameId "fKi4wjFx"]
+[UTCDate "2026.09.25"]
+[UTCTime "13:59:30"]
+[WhiteElo "?"]
+[BlackElo "1500"]
+[Variant "Standard"]
+[TimeControl "-"]
+[Termination "Normal"]
+
+1. e4 c5 2. c4 Nc6 3. d3 e6 4. Ne2 Nf6 5. Nbc3 a6 6. Bd2 Nb4 7. Ng3 Be7 8. e5 Ng8 9. Nce4 Qc7 10. f4 d6 11. exd6 Bxd6 12. Nh5 Qe7 13. Bc3 f6 14. g3 e5 15. a3 Nc6 16. Nxg7+ Qxg7 17. Bg2 Bf8 18. fxe5 fxe5 19. h3 Qg6 20. O-O Bf5 21. g4 Bxe4 22. Rxf8+ Kxf8 23. Bxe4 Qf7 24. Bd5 Qf4 25. Qe2 Nd4 26. Bxd4 cxd4 27. Rf1 Qxf1+ 28. Kxf1 Ke7 29. Qxe5+ Kd7 30. Kg2 Kd8 1-0
+
+

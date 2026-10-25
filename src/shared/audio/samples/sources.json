@@ -1,0 +1,38 @@
+{
+  "processing": "Mono PCM16 WAV at 48000 Hz; trim below -60 dBFS with 10 ms lead and 30 ms tail; constant gain, no compression or pitch shift. Loudness measured with K weighting and a fixed 1-second padded window for each short effect; target -32 LUFS, true peak at most -2 dBTP.",
+  "recordings": [
+    {
+      "name": "move",
+      "source": "https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3",
+      "sourceSha256": "3a2eb75af1334c06dafd735c23388a560285e0df9436a44d27adc95a010a8547",
+      "trimStartSeconds": 0.0,
+      "trimEndSeconds": 0.153875,
+      "gainDb": 3.75,
+      "loudnessLufs": -31.95,
+      "truePeakDbtp": -2.68,
+      "bytes": 14888
+    },
+    {
+      "name": "capture",
+      "source": "https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/capture.mp3",
+      "sourceSha256": "7158a77f3eb9a763fe723e9c9291819de8748444a1192d10383159fd8175709b",
+      "trimStartSeconds": 0.0,
+      "trimEndSeconds": 0.19691666666666666,
+      "gainDb": 1.45,
+      "loudnessLufs": -31.95,
+      "truePeakDbtp": -5.0,
+      "bytes": 19020
+    },
+    {
+      "name": "check",
+      "source": "https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-check.mp3",
+      "sourceSha256": "ef4764a74d19d0db1659e413e8afadc25f1e8cfba83a4a76e6e64f28f3077d52",
+      "trimStartSeconds": 0.0,
+      "trimEndSeconds": 0.18483333333333332,
+      "gainDb": 1.55,
+      "loudnessLufs": -31.95,
+      "truePeakDbtp": -8.03,
+      "bytes": 17860
+    }
+  ]
+}

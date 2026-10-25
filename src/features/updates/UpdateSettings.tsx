@@ -21,9 +21,6 @@ export default function UpdateSettings() {
             当前版本 {update.currentVersion || "—"}
           </Text>
         </Flex>
-        <Text size="2" color="gray">
-          检查 GitHub 上的正式版本，更新完成后自动重启。
-        </Text>
         {update.message && (
           <Text
             size="2"

@@ -76,6 +76,14 @@ function playReviewSound(previous: ReviewTree, next: ReviewTree) {
   else playMoveSound(destination.san);
 }
 
+function cancelBatch(batch: { generation: number; requestId: string | null }) {
+  batch.generation++;
+  if (batch.requestId) {
+    void api.engineStop(batch.requestId).catch(() => {});
+    batch.requestId = null;
+  }
+}
+
 export default function AnalysisPage() {
   const { id } = useParams();
   const navigateTo = useNavigate();
@@ -96,7 +104,6 @@ export default function AnalysisPage() {
   const [copiedFen, setCopiedFen] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
-  const [showPuzzle, setShowPuzzle] = useState(false);
   const [activeTool, setActiveTool] = useState<"position" | "batch" | "puzzle">(
     "position",
   );
@@ -140,19 +147,14 @@ export default function AnalysisPage() {
       (result) => setGameAnalysis({ ...result, gameId }),
     );
   }, [gameId, gameMoves, analysisRetry]);
-  const batchGeneration = useRef(0);
-  const batchRequest = useRef<string | null>(null);
-  const cancelBatch = useCallback(() => {
-    batchGeneration.current++;
-    if (batchRequest.current) {
-      void api.engineStop(batchRequest.current).catch(() => {});
-      batchRequest.current = null;
-    }
+  const batch = useRef({ generation: 0, requestId: null as string | null });
+  useEffect(() => {
+    const current = batch.current;
+    return () => cancelBatch(current);
   }, []);
-  useEffect(() => cancelBatch, [cancelBatch]);
   function changeEngineEnabled(enabled: boolean) {
     if (!enabled) {
-      cancelBatch();
+      cancelBatch(batch.current);
       setBatchProgress("已取消");
     }
     setEngineEnabled(enabled);
@@ -339,9 +341,9 @@ export default function AnalysisPage() {
       );
       return;
     }
-    cancelBatch();
-    const generation = batchGeneration.current;
-    const cancelled = () => generation !== batchGeneration.current;
+    cancelBatch(batch.current);
+    const generation = batch.current.generation;
+    const cancelled = () => generation !== batch.current.generation;
     setCandidates([]);
     setBatchProgress("准备分析…");
     try {
@@ -365,16 +367,12 @@ export default function AnalysisPage() {
       };
       const analyze = async (position: string) => {
         const requestId = crypto.randomUUID();
-        batchRequest.current = requestId;
+        batch.current.requestId = requestId;
         try {
-          return await api.engineAnalyze(
-            path,
-            position,
-            Number(depth),
-            requestId,
-          );
+          return await api.engineAnalyze(path, position, depth, requestId);
         } finally {
-          if (batchRequest.current === requestId) batchRequest.current = null;
+          if (batch.current.requestId === requestId)
+            batch.current.requestId = null;
         }
       };
       const found: Candidate[] = [];
@@ -435,7 +433,7 @@ export default function AnalysisPage() {
     }
   }
   async function openPuzzleForm() {
-    if (showPuzzle) {
+    if (puzzleOrigin) {
       setActiveTool("puzzle");
       return;
     }
@@ -445,9 +443,9 @@ export default function AnalysisPage() {
       fen,
     });
     setAnswers("");
+    setDescription(currentMove ? (notes[noteKey] ?? "") : "");
     setTitle("");
     setGeneratedTitle("");
-    setShowPuzzle(true);
     setActiveTool("puzzle");
     await changePuzzleCategory(puzzleCategory);
   }
@@ -460,7 +458,6 @@ export default function AnalysisPage() {
       if (request !== titleRequest.current) return;
       setTitle(name);
       setGeneratedTitle(name);
-      setShowPuzzle(true);
       setActiveTool("puzzle");
     } catch (error) {
       if (request === titleRequest.current) setMessage(String(error));
@@ -491,7 +488,7 @@ export default function AnalysisPage() {
     };
     try {
       const savedTitle = await api.savePuzzle(puzzle);
-      setShowPuzzle(false);
+      setPuzzleOrigin(null);
       setActiveTool("position");
       setAnswers("");
       setMessage(`题目「${savedTitle}」已加入题库`);
@@ -886,6 +883,7 @@ export default function AnalysisPage() {
             <MoveList
               tree={review}
               qualities={qualities}
+              notes={notes}
               analysisStatus={engineEnabled ? preanalysis?.status : undefined}
               onRetry={
                 engineEnabled && preanalysis?.failed
@@ -943,7 +941,7 @@ export default function AnalysisPage() {
                     size="1"
                     variant="soft"
                     onClick={() => {
-                      cancelBatch();
+                      cancelBatch(batch.current);
                       setBatchProgress("已取消");
                     }}
                   >
@@ -982,7 +980,7 @@ export default function AnalysisPage() {
               </>
             )}
           </Card>
-          {showPuzzle && (
+          {puzzleOrigin && (
             <Card
               className={
                 activeTool === "puzzle"

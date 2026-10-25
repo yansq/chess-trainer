@@ -77,7 +77,7 @@ export const useLichessSync = create<SyncStore>((set, get) => ({
       });
     } catch (error) {
       set({
-        message: `同步未完成：${error}。请重试。`,
+        message: `同步未完成：${error instanceof Error ? error.message : String(error)}。请重试。`,
       });
     } finally {
       worker?.terminate();
