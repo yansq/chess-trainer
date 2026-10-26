@@ -10,3 +10,9 @@ src-tauri/target/
 release/
 *.key
 *.key.pub
+
+# Local assistant skills and workflow metadata
+/.agents/
+/.claude/
+/.pi/
+/openspec/
