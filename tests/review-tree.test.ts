@@ -3,6 +3,7 @@ import { Chess } from "chess.js";
 import { parsePgn } from "../src/features/games/pgn";
 import {
   createReviewTree,
+  deleteReviewBranch,
   currentReviewMove,
   moveNumber,
   navigateReview,
@@ -109,5 +110,99 @@ describe("复盘试走分支", () => {
     const branch = playReviewMove(tree, "a7", "a8", "n")!;
     expect(currentReviewMove(branch)?.san).toBe("a8=N");
     expect(currentReviewMove(branch)?.uci).toBe("a7a8n");
+  });
+});
+
+describe("恢复已保存的分支", () => {
+  it("恢复稳定节点、嵌套分支和主线，并复用已有走法", () => {
+    const original = sample();
+    const fork = selectReviewMove(original, original.moves[2].id);
+    const first = playReviewMove(fork, "g8", "f6")!;
+    const continuation = playReviewMove(first, "f1", "b5")!;
+    const nested = playReviewMove(
+      navigateReview(continuation, "back"),
+      "f1",
+      "c4",
+    )!;
+    const variations = JSON.parse(
+      JSON.stringify(nested.moves.filter((m) => m.sourceMoveId === null)),
+    );
+    const restored = createReviewTree(
+      parsePgn("1. e4 e5 2. Nf3 Nc6 *", "local").moves,
+      variations,
+    );
+    expect(restored.currentId).toBeNull();
+    expect(restored.moves).toHaveLength(nested.moves.length);
+    expect(restored.moves.filter((m) => m.sourceMoveId !== null)).toHaveLength(
+      4,
+    );
+    const selected = selectReviewMove(restored, continuation.currentId);
+    expect(currentReviewMove(selected)?.san).toBe("Bb5");
+    expect(navigateReview(selected, "back").currentId).toBe(first.currentId);
+    const repeated = playReviewMove(
+      selectReviewMove(restored, original.moves[2].id),
+      "g8",
+      "f6",
+    )!;
+    expect(repeated.currentId).toBe(first.currentId);
+    expect(repeated.moves).toHaveLength(restored.moves.length);
+    expect(currentReviewMove(returnToMainline(selected))?.san).toBe("Nc6");
+    expect(
+      currentReviewMove(selectReviewMove(restored, nested.currentId))?.san,
+    ).toBe("Bc4");
+  });
+});
+
+describe("删除复盘分支", () => {
+  function branched() {
+    const base = sample();
+    const first = playReviewMove(
+      selectReviewMove(base, base.moves[2].id),
+      "g8",
+      "f6",
+    )!;
+    const child = playReviewMove(first, "f1", "b5")!;
+    const nested = playReviewMove(child, "b8", "c6")!;
+    const sibling = playReviewMove(
+      selectReviewMove(nested, first.currentId),
+      "f1",
+      "c4",
+    )!;
+    return { base, first, child, nested, sibling };
+  }
+  it("删除子分支及其后续变化，当前局面退回父节点，保留相邻分支", () => {
+    const { first, child, nested, sibling } = branched();
+    const selected = selectReviewMove(sibling, nested.currentId);
+    const result = deleteReviewBranch(
+      { ...selected, moves: [...selected.moves].reverse() },
+      child.currentId!,
+    );
+    expect(
+      result.moves.some(
+        (m) => m.id === child.currentId || m.id === nested.currentId,
+      ),
+    ).toBe(false);
+    expect(result.moves.some((m) => m.id === sibling.currentId)).toBe(true);
+    expect(result.currentId).toBe(first.currentId);
+    expect(navigateReview(result, "next").currentId).toBe(sibling.currentId);
+    expect(Object.values(result.preferred)).not.toContain(child.currentId);
+  });
+  it("删除整条分支时保留主线；删除非当前分支不改变棋盘", () => {
+    const { base, first, sibling } = branched();
+    const tree = selectReviewMove(sibling, base.moves[3].id);
+    const result = deleteReviewBranch(tree, first.currentId!);
+    expect(result.moves).toEqual(base.moves);
+    expect(result.currentId).toBe(base.moves[3].id);
+    expect(deleteReviewBranch(tree, base.moves[0].id)).toBe(tree);
+    expect(deleteReviewBranch(tree, "missing")).toBe(tree);
+  });
+  it("删除从初始局面开始的分支后退回初始局面", () => {
+    const base = sample();
+    const root = playReviewMove(base, "d2", "d4")!;
+    const selected = playReviewMove(root, "d7", "d5")!;
+    const result = deleteReviewBranch(selected, root.currentId!);
+    expect(result.currentId).toBeNull();
+    expect(result.moves).toEqual(base.moves);
+    expect(navigateReview(result, "next").currentId).toBe(base.moves[0].id);
   });
 });

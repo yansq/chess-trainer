@@ -56,6 +56,7 @@ import { puzzleContinuation } from "./puzzle-continuation";
 import { parsePuzzleAnswers } from "../puzzles/answers";
 import {
   createReviewTree,
+  deleteReviewBranch,
   currentReviewMove,
   moveNumber,
   navigateReview,
@@ -89,6 +90,15 @@ export default function AnalysisPage() {
   const navigateTo = useNavigate();
   const [game, setGame] = useState<Game | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [deletingBranch, setDeletingBranch] = useState(false);
+  const deletePending = useRef(false);
+  const reviewWrites = useRef(Promise.resolve());
+  const reviewGeneration = useRef(0);
+  function enqueueReviewWrite(write: () => Promise<void>) {
+    const pending = reviewWrites.current.catch(() => {}).then(write);
+    reviewWrites.current = pending;
+    return pending;
+  }
   const [engineEnabled, setEngineEnabled] = useState(true);
   const [review, setReview] = useState(() => createReviewTree([]));
   const [selectedSquare, setSelectedSquare] = useState<{
@@ -104,6 +114,10 @@ export default function AnalysisPage() {
   const [copiedFen, setCopiedFen] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [branchSaveError, setBranchSaveError] = useState<{
+    gameId: string;
+    message: string;
+  } | null>(null);
   const [activeTool, setActiveTool] = useState<"position" | "batch" | "puzzle">(
     "position",
   );
@@ -168,26 +182,35 @@ export default function AnalysisPage() {
   }, [copiedFen]);
   useEffect(() => {
     if (!id) return;
-    api
-      .getGame(id)
-      .then((g) => {
-        setGame(g);
-        setReview(createReviewTree(g.moves));
-        setNotes({});
-        setFlipped(g.userColor === "black");
-        return api.getAnnotations(id);
-      })
-      .then((rows) => {
+    let active = true;
+    reviewGeneration.current++;
+    Promise.all([
+      api.getGame(id),
+      api.getReviewVariations(id),
+      api.getAnnotations(id),
+    ])
+      .then(([g, variations, rows]) => {
+        if (!active) return;
         const map: Record<string, string> = {};
         for (const [moveId, content] of rows)
           map[moveId ?? "summary"] = content;
+        setReview(createReviewTree(g.moves, variations));
         setNotes(map);
+        setFlipped(g.userColor === "black");
+        setMessage("");
+        setGame(g);
       })
-      .catch((e) => setMessage(String(e)));
+      .catch((e) => {
+        if (active) setMessage(String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, [id]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
+        deletePending.current ||
         e.defaultPrevented ||
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -234,6 +257,7 @@ export default function AnalysisPage() {
   const badge = quality?.category ? qualityBadges[quality.category] : null;
   const markedSquare = badge ? currentMove?.uci.slice(2, 4) : null;
   function changeReview(next: ReviewTree) {
+    if (deletePending.current) return;
     playReviewSound(review, next);
     syncPuzzleAnswers(next);
     setSelectedSquare(null);
@@ -270,7 +294,66 @@ export default function AnalysisPage() {
         })),
     );
   }, [game, inBranch, currentMove, engine, engineStatus, engineEnabled]);
+  async function persistBranches(tree: ReviewTree) {
+    if (!game) throw new Error("对局尚未加载");
+    if (deletePending.current) return;
+    try {
+      await enqueueReviewWrite(() =>
+        api.saveReviewVariations(
+          game.id,
+          tree.moves.filter((move) => move.sourceMoveId === null),
+        ),
+      );
+      setBranchSaveError((error) => (error?.gameId === game.id ? null : error));
+    } catch (error) {
+      setBranchSaveError({ gameId: game.id, message: String(error) });
+      throw error;
+    }
+  }
+  async function deleteBranch(moveId: string) {
+    if (!game || deletePending.current) return;
+    const next = deleteReviewBranch(review, moveId);
+    if (next === review) return;
+    const generation = reviewGeneration.current;
+    deletePending.current = true;
+    setDeletingBranch(true);
+    try {
+      await enqueueReviewWrite(async () => {
+        // Finish pending saves before deleting, so late writes cannot restore the branch.
+        await api.saveReviewVariations(
+          game.id,
+          review.moves.filter((move) => move.sourceMoveId === null),
+        );
+        await api.deleteReviewVariation(game.id, moveId);
+      });
+      if (generation !== reviewGeneration.current) return;
+      deletePending.current = false;
+      changeReview(next);
+      const remaining = new Set(next.moves.map((move) => move.id));
+      setNotes((previous) =>
+        Object.fromEntries(
+          Object.entries(previous).filter(
+            ([id]) => id === "summary" || remaining.has(id),
+          ),
+        ),
+      );
+      setBranchSaveError((error) => (error?.gameId === game.id ? null : error));
+      setMessage("");
+      if (puzzleOrigin?.moveId && !remaining.has(puzzleOrigin.moveId)) {
+        setPuzzleOrigin(null);
+        setActiveTool("position");
+        setAnswers("");
+      }
+    } catch (error) {
+      if (generation === reviewGeneration.current)
+        setMessage(`删除分支失败：${error}`);
+    } finally {
+      deletePending.current = false;
+      setDeletingBranch(false);
+    }
+  }
   function playMove(from: string, to: string, piece?: string): boolean {
+    if (deletePending.current) return false;
     const next = playReviewMove(review, from, to, piece);
     if (!next) return false;
     if (
@@ -283,6 +366,9 @@ export default function AnalysisPage() {
       return false;
     }
     changeReview(next);
+    if (next.moves !== review.moves) {
+      void persistBranches(next).catch(() => {});
+    }
     return true;
   }
   function clickSquare(square: string) {
@@ -505,7 +591,7 @@ export default function AnalysisPage() {
         请从「对局」列表选择一局开始复盘。
       </Grid>
     );
-  if (!game)
+  if (!game || game.id !== id)
     return (
       <Grid
         px="5"
@@ -552,6 +638,20 @@ export default function AnalysisPage() {
           </Button>{" "}
         </Flex>
       </Flex>
+      {branchSaveError?.gameId === game.id && (
+        <Flex align="center" gap="2" mb="2" className="shrink-0" role="alert">
+          <Text size="2" color="red">
+            分支保存失败：{branchSaveError.message}
+          </Text>
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() => void persistBranches(review).catch(() => {})}
+          >
+            重试保存分支
+          </Button>
+        </Flex>
+      )}
       <Box className="mb-2 h-7 shrink-0" role="status" aria-live="polite">
         {(message || quality?.status) && (
           <Box className="h-full overflow-auto rounded-md border border-notice-edge bg-notice px-3 py-1 text-xs text-notice-ink">
@@ -739,9 +839,21 @@ export default function AnalysisPage() {
           <Box className="min-h-0">
             <NotePanel
               key={noteKey}
-              gameId={game.id}
-              moveId={currentMove?.sourceMoveId ?? null}
-              temporary={inBranch}
+              disabled={deletingBranch}
+              onSave={(content) =>
+                enqueueReviewWrite(async () => {
+                  if (inBranch)
+                    await api.saveReviewVariations(
+                      game.id,
+                      review.moves.filter((move) => move.sourceMoveId === null),
+                    );
+                  await api.saveAnnotation(
+                    game.id,
+                    currentMove?.id ?? null,
+                    content,
+                  );
+                })
+              }
               heading={
                 currentMove
                   ? `${moveNumber(currentMove)} ${currentMove.san} · ${inBranch ? "分支笔记" : "招法笔记"}`
@@ -750,9 +862,7 @@ export default function AnalysisPage() {
               content={notes[noteKey] ?? ""}
               onSaved={(content) => {
                 setNotes((n) => ({ ...n, [noteKey]: content }));
-                setMessage(
-                  inBranch ? "分支笔记已暂存于当前复盘" : "笔记已保存",
-                );
+                setMessage("");
               }}
               onError={setMessage}
             />
@@ -884,7 +994,15 @@ export default function AnalysisPage() {
               tree={review}
               qualities={qualities}
               notes={notes}
-              analysisStatus={engineEnabled ? preanalysis?.status : undefined}
+              deleting={deletingBranch}
+              onDelete={(moveId) => void deleteBranch(moveId)}
+              analysisStatus={
+                deletingBranch
+                  ? "正在删除分支…"
+                  : engineEnabled
+                    ? preanalysis?.status
+                    : undefined
+              }
               onRetry={
                 engineEnabled && preanalysis?.failed
                   ? () => setAnalysisRetry((value) => value + 1)

@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   Game,
   GameImport,
+  ReviewVariation,
   GameFilter,
   GamePage,
   Puzzle,
@@ -30,6 +31,12 @@ export const api = {
     invoke<number>("import_games", { games }),
   listGames: (filter: GameFilter) => invoke<GamePage>("list_games", { filter }),
   getGame: (id: string) => invoke<Game>("get_game", { id }),
+  getReviewVariations: (gameId: string) =>
+    invoke<ReviewVariation[]>("get_review_variations", { gameId }),
+  saveReviewVariations: (gameId: string, variations: ReviewVariation[]) =>
+    invoke<void>("save_review_variations", { gameId, variations }),
+  deleteReviewVariation: (gameId: string, moveId: string) =>
+    invoke<void>("delete_review_variation", { gameId, moveId }),
   saveAnnotation: (gameId: string, moveId: string | null, content: string) =>
     invoke<void>("save_annotation", { gameId, moveId, content }),
   getAnnotations: (gameId: string) =>

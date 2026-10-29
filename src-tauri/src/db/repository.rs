@@ -33,7 +33,12 @@ pub struct Game {
     pub review_status: bool,
     #[serde(skip_deserializing)]
     pub is_bot: bool,
+    #[serde(default = "default_own_game")]
+    pub is_own_game: bool,
     pub moves: Vec<Move>,
+}
+fn default_own_game() -> bool {
+    true
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -153,10 +158,11 @@ fn game_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Game> {
         pgn: row.get(13)?,
         review_status: row.get(14)?,
         is_bot: row.get(15)?,
+        is_own_game: row.get(16)?,
         moves: vec![],
     })
 }
-const GAME_SELECT:&str="SELECT id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,review_status,is_bot FROM games";
+const GAME_SELECT:&str="SELECT id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,review_status,is_bot,is_own_game FROM games";
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPending {
@@ -176,7 +182,7 @@ pub struct SyncCheckpoint {
 }
 pub fn import_games(db: &mut Connection, games: Vec<Game>) -> Result<usize, String> {
     let tx = db.transaction().map_err(err)?;
-    let count = write_games(&tx, games)?;
+    let count = write_games(&tx, games, true)?;
     tx.commit().map_err(err)?;
     Ok(count)
 }
@@ -187,7 +193,7 @@ pub fn import_sync_batch(
     mut checkpoint: SyncCheckpoint,
 ) -> Result<SyncCheckpoint, String> {
     let tx = db.transaction().map_err(err)?;
-    let count = write_games(&tx, games)?;
+    let count = write_games(&tx, games, false)?;
     checkpoint.added += count;
     let value = serde_json::to_string(&checkpoint).map_err(err)?;
     set_setting(
@@ -198,7 +204,7 @@ pub fn import_sync_batch(
     tx.commit().map_err(err)?;
     Ok(checkpoint)
 }
-fn write_games(tx: &Connection, games: Vec<Game>) -> Result<usize, String> {
+fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Result<usize, String> {
     let mut count = 0;
     for g in games {
         let existing: Option<String> = if let Some(ref external) = g.external_game_id {
@@ -223,7 +229,7 @@ fn write_games(tx: &Connection, games: Vec<Game>) -> Result<usize, String> {
             .map_err(err)?
             .is_none();
         let is_bot = super::game_kind::is_bot_game(&g.pgn, &g.white_player, &g.black_player);
-        tx.execute("INSERT INTO games(id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,is_bot,last_synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET white_player=excluded.white_player,black_player=excluded.black_player,user_color=COALESCE(excluded.user_color,games.user_color),result=excluded.result,played_at=excluded.played_at,time_control=excluded.time_control,speed=excluded.speed,rated=excluded.rated,eco=excluded.eco,opening_name=excluded.opening_name,pgn=excluded.pgn,is_bot=excluded.is_bot,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",params![id,g.source,g.external_game_id,g.white_player,g.black_player,g.user_color,g.result,g.played_at,g.time_control,g.speed,g.rated,g.eco,g.opening_name,g.pgn,is_bot]).map_err(err)?;
+        tx.execute("INSERT INTO games(id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,is_bot,is_own_game,last_synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET white_player=excluded.white_player,black_player=excluded.black_player,user_color=COALESCE(excluded.user_color,games.user_color),result=excluded.result,played_at=excluded.played_at,time_control=excluded.time_control,speed=excluded.speed,rated=excluded.rated,eco=excluded.eco,opening_name=excluded.opening_name,pgn=excluded.pgn,is_bot=excluded.is_bot,is_own_game=CASE WHEN ?17 THEN excluded.is_own_game ELSE games.is_own_game END,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",params![id,g.source,g.external_game_id,g.white_player,g.black_player,g.user_color,g.result,g.played_at,g.time_control,g.speed,g.rated,g.eco,g.opening_name,g.pgn,is_bot,if update_ownership { g.is_own_game } else { true },update_ownership]).map_err(err)?;
         if fresh {
             for m in g.moves {
                 tx.execute("INSERT INTO moves(id,game_id,ply,san,uci,fen_before,fen_after) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![format!("{}:{}",id,m.ply),id,m.ply,m.san,m.uci,m.fen_before,m.fen_after]).map_err(err)?;
@@ -295,12 +301,127 @@ pub fn get_game(db: &Connection, id: &str) -> Result<Game, String> {
         .map_err(err)?;
     Ok(game)
 }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewVariation {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub ply: i64,
+    pub san: String,
+    pub uci: String,
+    pub fen_before: String,
+    pub fen_after: String,
+}
+fn variation_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewVariation> {
+    Ok(ReviewVariation {
+        id: r.get(0)?,
+        parent_id: r.get(1)?,
+        ply: r.get(2)?,
+        san: r.get(3)?,
+        uci: r.get(4)?,
+        fen_before: r.get(5)?,
+        fen_after: r.get(6)?,
+    })
+}
+pub fn review_variations(db: &Connection, game_id: &str) -> Result<Vec<ReviewVariation>, String> {
+    let mut s = db.prepare("SELECT id,parent_id,ply,san,uci,fen_before,fen_after FROM review_variations WHERE game_id=?1 ORDER BY ply,rowid").map_err(err)?;
+    let rows = s.query_map([game_id], variation_from_row).map_err(err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
+}
+pub fn save_review_variations(
+    db: &Connection,
+    game_id: &str,
+    mut variations: Vec<ReviewVariation>,
+) -> Result<(), String> {
+    let tx = db.unchecked_transaction().map_err(err)?;
+    // Parents precede their children, including nested variations in the same batch.
+    variations.sort_by_key(|v| v.ply);
+    for v in variations {
+        if !v.id.starts_with("variation:") || v.id == v.parent_id.as_deref().unwrap_or("") {
+            return Err("分支招法标识无效".into());
+        }
+        let parent: Option<(i64, String)> = if let Some(parent_id) = &v.parent_id {
+            tx.query_row("SELECT ply,fen_after FROM moves WHERE game_id=?1 AND id=?2 UNION ALL SELECT ply,fen_after FROM review_variations WHERE game_id=?1 AND id=?2", params![game_id,parent_id], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(err)?
+        } else {
+            let fen: Option<String> = tx
+                .query_row(
+                    "SELECT COALESCE((SELECT fen_before FROM moves WHERE game_id=?1 ORDER BY ply LIMIT 1),'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1') FROM games WHERE id=?1",
+                    [game_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(err)?;
+            fen.map(|fen| (0, fen))
+        };
+        let Some((ply, fen)) = parent else {
+            return Err("分支的上一步招法不存在或不属于当前对局".into());
+        };
+        if v.ply != ply + 1 || v.fen_before != fen {
+            return Err("分支招法与上一步局面不一致".into());
+        }
+        let existing: Option<(String, ReviewVariation)> = tx.query_row("SELECT game_id,id,parent_id,ply,san,uci,fen_before,fen_after FROM review_variations WHERE id=?1", [&v.id], |r| Ok((r.get(0)?, ReviewVariation { id:r.get(1)?,parent_id:r.get(2)?,ply:r.get(3)?,san:r.get(4)?,uci:r.get(5)?,fen_before:r.get(6)?,fen_after:r.get(7)? }))).optional().map_err(err)?;
+        if let Some((owner, existing)) = existing {
+            if owner != game_id || existing != v {
+                return Err("分支招法标识冲突".into());
+            }
+            continue;
+        }
+        tx.execute("INSERT INTO review_variations(id,game_id,parent_id,ply,san,uci,fen_before,fen_after) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![v.id,game_id,v.parent_id,v.ply,v.san,v.uci,v.fen_before,v.fen_after]).map_err(err)?;
+    }
+    tx.commit().map_err(err)
+}
+pub fn delete_review_variation(
+    db: &Connection,
+    game_id: &str,
+    move_id: &str,
+) -> Result<(), String> {
+    // Notes are stored on the variation row, so this one atomic statement removes both.
+    let deleted = db
+        .execute(
+            "WITH RECURSIVE subtree(id) AS (
+        SELECT id FROM review_variations WHERE game_id=?1 AND id=?2
+        UNION
+        SELECT v.id FROM review_variations v JOIN subtree s ON v.parent_id=s.id WHERE v.game_id=?1
+    ) DELETE FROM review_variations WHERE game_id=?1 AND id IN (SELECT id FROM subtree)",
+            params![game_id, move_id],
+        )
+        .map_err(err)?;
+    if deleted == 0 {
+        return Err("分支招法不存在或不属于当前对局".into());
+    }
+    Ok(())
+}
 pub fn save_annotation(
     db: &Connection,
     game_id: &str,
     move_id: Option<&str>,
     content: &str,
 ) -> Result<(), String> {
+    if let Some(move_id) = move_id {
+        if move_id.starts_with("variation:") {
+            let count = db
+                .execute(
+                    "UPDATE review_variations SET content=?3 WHERE game_id=?1 AND id=?2",
+                    params![game_id, move_id, content],
+                )
+                .map_err(err)?;
+            return if count == 1 {
+                Ok(())
+            } else {
+                Err("分支招法尚未保存，笔记保存失败".into())
+            };
+        }
+        let belongs: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM moves WHERE id=?1 AND game_id=?2)",
+                params![move_id, game_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if !belongs {
+            return Err("招法不属于当前对局".into());
+        }
+    }
     let id = format!("{game_id}:{}", move_id.unwrap_or("summary"));
     db.execute("INSERT INTO annotations(id,game_id,move_id,content) VALUES (?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET content=excluded.content,updated_at=CURRENT_TIMESTAMP",params![id,game_id,move_id,content]).map_err(err)?;
     Ok(())
@@ -310,7 +431,7 @@ pub fn annotations(
     game_id: &str,
 ) -> Result<Vec<(Option<String>, String)>, String> {
     let mut s = db
-        .prepare("SELECT move_id,content FROM annotations WHERE game_id=?1")
+        .prepare("SELECT move_id,content FROM annotations WHERE game_id=?1 UNION ALL SELECT id,content FROM review_variations WHERE game_id=?1 AND content<>''")
         .map_err(err)?;
     {
         let result = s
@@ -538,7 +659,7 @@ pub fn opening_stats(
     to: Option<&str>,
     opponent_type: OpponentType,
 ) -> Result<Vec<Value>, String> {
-    let mut s=db.prepare("SELECT COALESCE(eco,'—'),COALESCE(opening_name,'未知开局'),COUNT(*),SUM(CASE WHEN result=user_color THEN 1 ELSE 0 END),SUM(CASE WHEN result='draw' THEN 1 ELSE 0 END),SUM(CASE WHEN result IN ('white','black') AND result<>user_color THEN 1 ELSE 0 END) FROM games WHERE user_color IS NOT NULL AND result IN ('white','black','draw') AND (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR speed=?2) AND (?3 IS NULL OR played_at>=?3) AND (?4 IS NULL OR played_at<?4) AND (?5 IS NULL OR is_bot=?5) GROUP BY COALESCE(eco,'—'),COALESCE(opening_name,'未知开局') ORDER BY COUNT(*) DESC").map_err(err)?;
+    let mut s=db.prepare("SELECT COALESCE(eco,'—'),COALESCE(opening_name,'未知开局'),COUNT(*),SUM(CASE WHEN result=user_color THEN 1 ELSE 0 END),SUM(CASE WHEN result='draw' THEN 1 ELSE 0 END),SUM(CASE WHEN result IN ('white','black') AND result<>user_color THEN 1 ELSE 0 END) FROM games WHERE is_own_game=1 AND user_color IS NOT NULL AND result IN ('white','black','draw') AND (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR speed=?2) AND (?3 IS NULL OR played_at>=?3) AND (?4 IS NULL OR played_at<?4) AND (?5 IS NULL OR is_bot=?5) GROUP BY COALESCE(eco,'—'),COALESCE(opening_name,'未知开局') ORDER BY COUNT(*) DESC").map_err(err)?;
     let result=s.query_map(params![color,speed,from,to,opponent_type.is_bot()],|r|{let count:i64=r.get(2)?;let wins:i64=r.get(3)?;let draws:i64=r.get(4)?;Ok(serde_json::json!({"eco":r.get::<_,String>(0)?,"opening":r.get::<_,String>(1)?,"total":count,"wins":wins,"draws":draws,"losses":r.get::<_,i64>(5)?,"winRate":wins as f64/count as f64,"scoreRate":(wins as f64+draws as f64*0.5)/count as f64}))}).map_err(err)?.collect::<rusqlite::Result<Vec<_>>>().map_err(err);
     result
 }
@@ -631,6 +752,121 @@ mod tests {
         assert!(get_game(&db, "bot").unwrap().is_bot);
     }
 
+    #[test]
+    fn non_own_games_are_excluded_from_all_statistics_but_remain_reviewable() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let mut own = sample_game();
+        own.id = "own".into();
+        own.external_game_id = None;
+        let mut loss = sample_game();
+        loss.id = "loss".into();
+        loss.external_game_id = None;
+        loss.result = "black".into();
+        let mut other = sample_game();
+        other.id = "other".into();
+        other.external_game_id = None;
+        other.is_own_game = false;
+        let mut bot = sample_game();
+        bot.id = "other-bot".into();
+        bot.external_game_id = None;
+        bot.is_own_game = false;
+        bot.black_player = "Stockfish level 4".into();
+        assert_eq!(
+            import_games(&mut db, vec![own, loss, other, bot]).unwrap(),
+            4
+        );
+        let all = opening_stats(&db, None, None, None, None, OpponentType::All).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["total"], 2);
+        assert_eq!(all[0]["wins"], 1);
+        assert_eq!(all[0]["losses"], 1);
+        assert_eq!(all[0]["winRate"], 0.5);
+        assert_eq!(all[0]["scoreRate"], 0.5);
+        let filtered = opening_stats(
+            &db,
+            Some("white"),
+            Some("rapid"),
+            Some("2026-10-01"),
+            Some("2026-10-02"),
+            OpponentType::Human,
+        )
+        .unwrap();
+        assert_eq!(filtered, all);
+        assert!(
+            opening_stats(&db, None, None, None, None, OpponentType::Bot)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(list_games(&db, filter(OpponentType::All)).unwrap().total, 4);
+        let other = get_game(&db, "other").unwrap();
+        assert!(!other.is_own_game);
+        assert_eq!(other.moves.len(), 1);
+        assert_eq!(other.user_color.as_deref(), Some("white"));
+        save_annotation(&db, "other", Some("other:1"), "study note").unwrap();
+        assert_eq!(annotations(&db, "other").unwrap()[0].1, "study note");
+    }
+    #[test]
+    fn manual_reimport_changes_ownership_without_deleting_notes_and_sync_preserves_it() {
+        let path = std::env::temp_dir().join(format!(
+            "chess-ownership-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let mut db = Connection::open(&path).unwrap();
+            crate::db::migrations::migrate(&db).unwrap();
+            import_games(&mut db, vec![sample_game()]).unwrap();
+            save_annotation(
+                &db,
+                "lichess:abcdefgh",
+                Some("lichess:abcdefgh:1"),
+                "keep note",
+            )
+            .unwrap();
+            let mut other = sample_game();
+            other.is_own_game = false;
+            assert_eq!(import_games(&mut db, vec![other]).unwrap(), 0);
+            assert!(!get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
+            assert!(
+                opening_stats(&db, None, None, None, None, OpponentType::All)
+                    .unwrap()
+                    .is_empty()
+            );
+            let checkpoint = SyncCheckpoint {
+                completed_through: Some(1),
+                pending: None,
+                read: 1,
+                added: 0,
+                unfinished_ids: vec![],
+            };
+            import_sync_batch(&mut db, "Trainer", vec![sample_game()], checkpoint).unwrap();
+            assert!(!get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
+        }
+        {
+            let mut db = Connection::open(&path).unwrap();
+            crate::db::migrations::migrate(&db).unwrap();
+            assert!(!get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
+            assert_eq!(
+                annotations(&db, "lichess:abcdefgh").unwrap()[0].1,
+                "keep note"
+            );
+            assert_eq!(import_games(&mut db, vec![sample_game()]).unwrap(), 0);
+            assert!(get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
+            assert_eq!(
+                opening_stats(&db, None, None, None, None, OpponentType::All).unwrap()[0]["total"],
+                1
+            );
+            // Older import payloads and synchronized new games default to own games.
+            let mut payload = serde_json::to_value(sample_game()).unwrap();
+            payload.as_object_mut().unwrap().remove("isOwnGame");
+            assert!(serde_json::from_value::<Game>(payload).unwrap().is_own_game);
+        }
+        let _ = std::fs::remove_file(path);
+    }
     fn sample_game() -> Game {
         Game {
             id: "lichess:abcdefgh".into(),
@@ -649,6 +885,7 @@ mod tests {
             pgn: "1. e4 e5 1-0".into(),
             review_status: false,
             is_bot: false,
+            is_own_game: true,
             moves: vec![Move {
                 id: "lichess:abcdefgh:1".into(),
                 game_id: "lichess:abcdefgh".into(),
@@ -1242,5 +1479,203 @@ mod persistence_test {
         let _ = std::fs::remove_file(path.with_extension("db-wal"));
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod variation_tests {
+    use super::*;
+    fn setup(db: &Connection) {
+        crate::db::migrations::migrate(db).unwrap();
+        db.execute_batch("INSERT INTO games(id,source,white_player,black_player,result,pgn) VALUES ('g','local','A','B','draw','1. e4'),('other','local','C','D','draw','1. e4');
+            INSERT INTO moves(id,game_id,ply,san,uci,fen_before,fen_after) VALUES ('g:1','g',1,'e4','e2e4','start','after-e4');").unwrap();
+    }
+    fn branch(id: &str, parent: Option<&str>, ply: i64, before: &str) -> ReviewVariation {
+        ReviewVariation {
+            id: format!("variation:{id}"),
+            parent_id: parent.map(str::to_string),
+            ply,
+            san: id.into(),
+            uci: id.into(),
+            fen_before: before.into(),
+            fen_after: format!("after-{id}"),
+        }
+    }
+    #[test]
+    fn branches_and_notes_survive_reopen_without_overwriting_mainline_or_summary() {
+        let path = std::env::temp_dir().join(format!(
+            "chess-variations-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = branch("d4", None, 1, "start");
+        let reply = branch("d5", Some(&root.id), 2, &root.fen_after);
+        let nested = branch("Nf6", Some(&root.id), 2, &root.fen_after);
+        let main_fork = branch("c5", Some("g:1"), 2, "after-e4");
+        let expected = vec![
+            root.clone(),
+            reply.clone(),
+            nested.clone(),
+            main_fork.clone(),
+        ];
+        {
+            let mut db = Connection::open(&path).unwrap();
+            setup(&db);
+            save_annotation(&db, "g", None, "summary").unwrap();
+            save_annotation(&db, "g", Some("g:1"), "main note").unwrap();
+            // Out-of-order input is sorted transactionally by ply.
+            save_review_variations(
+                &db,
+                "g",
+                vec![
+                    reply.clone(),
+                    root.clone(),
+                    nested.clone(),
+                    main_fork.clone(),
+                ],
+            )
+            .unwrap();
+            save_annotation(&db, "g", Some(&root.id), "**中心计划**\n第二行").unwrap();
+            save_annotation(&db, "g", Some(&nested.id), "nested note").unwrap();
+            save_review_variations(&db, "g", expected.clone()).unwrap();
+            // Re-importing the game preserves stable mainline parents and branch notes.
+            let game = get_game(&db, "g").unwrap();
+            import_games(&mut db, vec![game]).unwrap();
+        }
+        {
+            let db = Connection::open(&path).unwrap();
+            crate::db::migrations::migrate(&db).unwrap();
+            assert_eq!(review_variations(&db, "g").unwrap(), expected);
+            let notes = annotations(&db, "g").unwrap();
+            assert!(notes.contains(&(None, "summary".into())));
+            assert!(notes.contains(&(Some("g:1".into()), "main note".into())));
+            assert!(notes.contains(&(Some(root.id.clone()), "**中心计划**\n第二行".into())));
+            assert!(notes.contains(&(Some(nested.id.clone()), "nested note".into())));
+            save_annotation(&db, "g", Some(&root.id), "").unwrap();
+            assert!(!annotations(&db, "g")
+                .unwrap()
+                .iter()
+                .any(|n| n.0.as_deref() == Some(&root.id)));
+            assert_eq!(get_game(&db, "g").unwrap().moves.len(), 1);
+            assert!(review_variations(&db, "other").unwrap().is_empty());
+            db.execute("DELETE FROM games WHERE id='g'", []).unwrap();
+            assert!(review_variations(&db, "g").unwrap().is_empty());
+            assert!(annotations(&db, "g").unwrap().is_empty());
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
+    fn supports_branches_when_game_has_no_mainline_moves() {
+        let db = Connection::open_in_memory().unwrap();
+        setup(&db);
+        let root = branch(
+            "d4",
+            None,
+            1,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        );
+        save_review_variations(&db, "other", vec![root.clone()]).unwrap();
+        save_annotation(&db, "other", Some(&root.id), "first branch").unwrap();
+        assert_eq!(review_variations(&db, "other").unwrap(), vec![root.clone()]);
+        assert_eq!(
+            annotations(&db, "other").unwrap(),
+            vec![(Some(root.id), "first branch".into())]
+        );
+    }
+    #[test]
+    fn deleting_variation_cascades_nested_moves_and_notes_but_preserves_other_data() {
+        let path = std::env::temp_dir().join(format!(
+            "chess-delete-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = branch("d4", None, 1, "start");
+        let child = branch("d5", Some(&root.id), 2, &root.fen_after);
+        let nested = branch("c4", Some(&child.id), 3, &child.fen_after);
+        let sibling = branch("Nf6", Some(&root.id), 2, &root.fen_after);
+        {
+            let db = Connection::open(&path).unwrap();
+            setup(&db);
+            save_review_variations(
+                &db,
+                "g",
+                vec![root.clone(), child.clone(), nested.clone(), sibling.clone()],
+            )
+            .unwrap();
+            for v in [&root, &child, &nested, &sibling] {
+                save_annotation(&db, "g", Some(&v.id), &v.san).unwrap();
+            }
+            save_annotation(&db, "g", None, "summary").unwrap();
+            save_annotation(&db, "g", Some("g:1"), "main").unwrap();
+            assert!(delete_review_variation(&db, "g", "g:1").is_err());
+            assert!(delete_review_variation(&db, "other", &root.id).is_err());
+            assert_eq!(review_variations(&db, "g").unwrap().len(), 4);
+            delete_review_variation(&db, "g", &child.id).unwrap();
+            assert_eq!(
+                review_variations(&db, "g").unwrap(),
+                vec![root.clone(), sibling.clone()]
+            );
+            let notes = annotations(&db, "g").unwrap();
+            assert!(!notes.iter().any(
+                |(id, _)| id.as_deref() == Some(&child.id) || id.as_deref() == Some(&nested.id)
+            ));
+            assert!(notes.contains(&(Some(sibling.id.clone()), sibling.san.clone())));
+            assert_eq!(get_game(&db, "g").unwrap().moves.len(), 1);
+        }
+        {
+            let db = Connection::open(&path).unwrap();
+            crate::db::migrations::migrate(&db).unwrap();
+            assert_eq!(
+                review_variations(&db, "g").unwrap(),
+                vec![root.clone(), sibling]
+            );
+            delete_review_variation(&db, "g", &root.id).unwrap();
+            assert!(review_variations(&db, "g").unwrap().is_empty());
+            let notes = annotations(&db, "g").unwrap();
+            assert_eq!(notes.len(), 2);
+            assert!(notes.contains(&(None, "summary".into())));
+            assert!(notes.contains(&(Some("g:1".into()), "main".into())));
+            assert!(get_game(&db, "other").is_ok());
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
+    fn rejects_cross_game_parents_notes_and_inconsistent_batches_atomically() {
+        let db = Connection::open_in_memory().unwrap();
+        setup(&db);
+        let root = branch("d4", None, 1, "start");
+        let bad = branch("bad", Some("missing"), 2, &root.fen_after);
+        assert!(save_review_variations(&db, "g", vec![root.clone(), bad]).is_err());
+        assert!(review_variations(&db, "g").unwrap().is_empty());
+        assert!(save_review_variations(
+            &db,
+            "other",
+            vec![branch("c5", Some("g:1"), 2, "after-e4")]
+        )
+        .is_err());
+        save_review_variations(&db, "g", vec![root.clone()]).unwrap();
+        save_annotation(&db, "g", Some(&root.id), "keep").unwrap();
+        assert!(save_annotation(&db, "other", Some(&root.id), "wrong").is_err());
+        assert!(save_annotation(&db, "other", Some("g:1"), "wrong").is_err());
+        assert!(save_annotation(&db, "g", Some("variation:missing"), "wrong").is_err());
+        let mut conflict = root.clone();
+        conflict.san = "changed".into();
+        assert!(save_review_variations(&db, "g", vec![conflict]).is_err());
+        assert_eq!(
+            annotations(&db, "g").unwrap(),
+            vec![(Some(root.id.clone()), "keep".into())]
+        );
+        let mut wrong_ply = branch("d5", Some(&root.id), 3, &root.fen_after);
+        assert!(save_review_variations(&db, "g", vec![wrong_ply.clone()]).is_err());
+        wrong_ply.ply = 2;
+        wrong_ply.fen_before = "wrong".into();
+        assert!(save_review_variations(&db, "g", vec![wrong_ply]).is_err());
+        assert_eq!(review_variations(&db, "g").unwrap(), vec![root]);
     }
 }

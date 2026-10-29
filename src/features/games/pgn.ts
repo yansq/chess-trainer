@@ -106,6 +106,7 @@ export function parsePgn(
     openingName: headers.Opening ?? null,
     pgn,
     reviewStatus: false,
+    isOwnGame: true,
     moves,
   };
 }

@@ -1,0 +1,1 @@
+ALTER TABLE games ADD COLUMN is_own_game INTEGER NOT NULL DEFAULT 1 CHECK(is_own_game IN (0,1));

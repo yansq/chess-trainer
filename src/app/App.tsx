@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 const GamesPage = lazy(() => import("../features/games/GamesPage"));
 const AnalysisPage = lazy(() => import("../features/analysis/AnalysisPage"));
+const PuzzleCreatePage = lazy(
+  () => import("../features/puzzles/PuzzleCreatePage"),
+);
 const PuzzleEditPage = lazy(() => import("../features/puzzles/PuzzleEditPage"));
 const PuzzlesPage = lazy(() => import("../features/puzzles/PuzzlesPage"));
 const ReviewPage = lazy(() => import("../features/review/ReviewPage"));
@@ -27,6 +30,7 @@ const nav = [
 ] as const;
 export default function App() {
   const reviewingGame = useMatch("/analysis/:id");
+  const creatingPuzzle = useMatch("/puzzles/new");
   const editingPuzzle = useMatch("/puzzles/:id/edit");
   return (
     <Grid className="sidebar-wide h-dvh grid-cols-shell overflow-hidden max-[900px]:sidebar-compact">
@@ -59,7 +63,7 @@ export default function App() {
         </nav>
       </aside>
       <main
-        className={` col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-400 overflow-auto overscroll-contain ${reviewingGame || editingPuzzle ? "!overflow-hidden px-6 py-5 max-[1150px]:px-5" : "px-10.5 pt-8.75 pb-12.5 max-[1150px]:px-6.25 max-[1150px]:py-7"}`}
+        className={` col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-400 overflow-auto overscroll-contain ${reviewingGame || editingPuzzle || creatingPuzzle ? `!overflow-hidden px-6 py-5 max-[1150px]:px-5 ${creatingPuzzle ? "max-[760px]:!overflow-auto" : ""}` : "px-10.5 pt-8.75 pb-12.5 max-[1150px]:px-6.25 max-[1150px]:py-7"}`}
       >
         <Suspense
           fallback={
@@ -83,6 +87,7 @@ export default function App() {
               element={<AnalysisPage key={reviewingGame?.params.id} />}
             />
             <Route path="/puzzles" element={<PuzzlesPage />} />
+            <Route path="/puzzles/new" element={<PuzzleCreatePage />} />
             <Route
               path="/puzzles/:id/edit"
               element={<PuzzleEditPage key={editingPuzzle?.params.id} />}

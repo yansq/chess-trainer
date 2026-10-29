@@ -7,6 +7,9 @@ export interface Move {
   fenBefore: string;
   fenAfter: string;
 }
+export interface ReviewVariation extends Omit<Move, "gameId"> {
+  parentId: string | null;
+}
 export interface Game {
   id: string;
   source: string;
@@ -24,6 +27,7 @@ export interface Game {
   pgn: string;
   reviewStatus: boolean;
   isBot: boolean;
+  isOwnGame: boolean;
   moves: Move[];
 }
 export type GameImport = Omit<Game, "isBot">;

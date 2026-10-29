@@ -1,6 +1,6 @@
 use crate::db::repository::{
-    self, Game, GameFilter, GamePage, OpponentType, Puzzle, PuzzleListItem, ReviewInput, Schedule,
-    SyncCheckpoint,
+    self, Game, GameFilter, GamePage, OpponentType, Puzzle, PuzzleListItem, ReviewInput,
+    ReviewVariation, Schedule, SyncCheckpoint,
 };
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -21,6 +21,29 @@ pub fn list_games(state: State<Database>, filter: GameFilter) -> Result<GamePage
 #[tauri::command]
 pub fn get_game(state: State<Database>, id: String) -> Result<Game, String> {
     repository::get_game(&*db(&state)?, &id)
+}
+#[tauri::command]
+pub fn get_review_variations(
+    state: State<Database>,
+    game_id: String,
+) -> Result<Vec<ReviewVariation>, String> {
+    repository::review_variations(&*db(&state)?, &game_id)
+}
+#[tauri::command]
+pub fn save_review_variations(
+    state: State<Database>,
+    game_id: String,
+    variations: Vec<ReviewVariation>,
+) -> Result<(), String> {
+    repository::save_review_variations(&*db(&state)?, &game_id, variations)
+}
+#[tauri::command]
+pub fn delete_review_variation(
+    state: State<Database>,
+    game_id: String,
+    move_id: String,
+) -> Result<(), String> {
+    repository::delete_review_variation(&*db(&state)?, &game_id, &move_id)
 }
 #[tauri::command]
 pub fn save_annotation(

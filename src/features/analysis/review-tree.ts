@@ -1,9 +1,8 @@
 import { Chess } from "chess.js";
-import type { Move } from "../../shared/types";
+import type { Move, ReviewVariation } from "../../shared/types";
 import { tryMove } from "../../shared/chess/moves";
 
-export interface ReviewMove extends Omit<Move, "gameId"> {
-  parentId: string | null;
+export interface ReviewMove extends ReviewVariation {
   sourceMoveId: string | null;
 }
 export interface ReviewTree {
@@ -13,14 +12,20 @@ export interface ReviewTree {
   preferred: Record<string, string>;
 }
 
-export function createReviewTree(moves: Move[]): ReviewTree {
+export function createReviewTree(
+  moves: Move[],
+  variations: ReviewVariation[] = [],
+): ReviewTree {
   return {
     initialFen: moves[0]?.fenBefore ?? new Chess().fen(),
-    moves: moves.map((move, index) => ({
-      ...move,
-      parentId: moves[index - 1]?.id ?? null,
-      sourceMoveId: move.id,
-    })),
+    moves: [
+      ...moves.map((move, index) => ({
+        ...move,
+        parentId: moves[index - 1]?.id ?? null,
+        sourceMoveId: move.id,
+      })),
+      ...variations.map((move) => ({ ...move, sourceMoveId: null })),
+    ],
     currentId: null,
     preferred: {},
   };
@@ -115,4 +120,39 @@ export function playReviewMove(
 export function moveNumber(move: ReviewMove): string {
   const [, side, , , , fullmove] = move.fenBefore.split(" ");
   return `${fullmove}${side === "w" ? "." : "…"}`;
+}
+
+export function deleteReviewBranch(tree: ReviewTree, id: string): ReviewTree {
+  const target = tree.moves.find((move) => move.id === id);
+  if (!target || target.sourceMoveId !== null) return tree;
+  const removed = new Set([id]);
+  // Follow parent links independently of storage order.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const move of tree.moves) {
+      if (
+        move.sourceMoveId === null &&
+        move.parentId !== null &&
+        removed.has(move.parentId) &&
+        !removed.has(move.id)
+      ) {
+        removed.add(move.id);
+        changed = true;
+      }
+    }
+  }
+  return {
+    ...tree,
+    moves: tree.moves.filter((move) => !removed.has(move.id)),
+    currentId:
+      tree.currentId !== null && removed.has(tree.currentId)
+        ? target.parentId
+        : tree.currentId,
+    preferred: Object.fromEntries(
+      Object.entries(tree.preferred).filter(
+        ([parent, child]) => !removed.has(parent) && !removed.has(child),
+      ),
+    ),
+  };
 }

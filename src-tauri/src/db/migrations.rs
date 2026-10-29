@@ -38,6 +38,18 @@ pub fn migrate(db: &Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", 4)?;
         tx.commit()?;
     }
+    if version < 5 {
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(include_str!("migrations/0005_review_variations.sql"))?;
+        tx.pragma_update(None, "user_version", 5)?;
+        tx.commit()?;
+    }
+    if version < 6 {
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(include_str!("migrations/0006_game_ownership.sql"))?;
+        tx.pragma_update(None, "user_version", 6)?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -114,6 +126,74 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_v4_preserving_mainline_and_notes() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("migrations/0001_initial.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("migrations/0002_review_counts.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("migrations/0003_game_kind.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("migrations/0004_puzzle_category.sql"))
+            .unwrap();
+        db.pragma_update(None, "user_version", 4).unwrap();
+        db.execute_batch("INSERT INTO games(id,source,white_player,black_player,result,pgn) VALUES ('g','local','A','B','draw','1. e4');
+            INSERT INTO moves(id,game_id,ply,san,uci,fen_before,fen_after) VALUES ('g:1','g',1,'e4','e2e4','before','after');
+            INSERT INTO annotations(id,game_id,move_id,content) VALUES ('summary','g',NULL,'summary'),('note','g','g:1','mainline');").unwrap();
+        migrate(&db).unwrap();
+        migrate(&db).unwrap();
+        assert_eq!(
+            super::super::repository::get_game(&db, "g")
+                .unwrap()
+                .moves
+                .len(),
+            1
+        );
+        assert_eq!(
+            super::super::repository::annotations(&db, "g")
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(super::super::repository::review_variations(&db, "g")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            6
+        );
+    }
+    #[test]
+    fn upgrades_v5_preserves_existing_game_ownership_and_notes() {
+        let db = Connection::open_in_memory().unwrap();
+        migrate(&db).unwrap();
+        // Recreate the pre-ownership schema using the actual preceding migrations.
+        db.execute_batch("ALTER TABLE games DROP COLUMN is_own_game; PRAGMA user_version=5;
+            INSERT INTO games(id,source,white_player,black_player,user_color,result,pgn) VALUES ('g','local','Trainer','Opponent','white','white','1. e4');
+            INSERT INTO annotations(id,game_id,content) VALUES ('summary','g','keep summary');").unwrap();
+        migrate(&db).unwrap();
+        migrate(&db).unwrap();
+        let game = super::super::repository::get_game(&db, "g").unwrap();
+        assert!(game.is_own_game);
+        assert_eq!(
+            super::super::repository::annotations(&db, "g").unwrap()[0].1,
+            "keep summary"
+        );
+        assert_eq!(
+            super::super::repository::opening_stats(
+                &db,
+                None,
+                None,
+                None,
+                None,
+                super::super::repository::OpponentType::All
+            )
+            .unwrap()[0]["total"],
+            1
+        );
+    }
+    #[test]
     fn upgrades_existing_v1_and_can_repeat() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("migrations/0001_initial.sql"))
@@ -123,7 +203,7 @@ mod tests {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 6);
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM pragma_table_info('review_schedules') WHERE name IN ('total_attempts','correct_count')", [], |r| r.get(0))
             .unwrap();

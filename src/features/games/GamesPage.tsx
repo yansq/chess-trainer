@@ -4,9 +4,11 @@ import {
   Button,
   Callout,
   Card,
+  Dialog,
   Flex,
   Heading,
   Table,
+  TextArea,
   TextField,
 } from "@radix-ui/themes";
 import { useEffect, useRef, useState } from "react";
@@ -40,6 +42,10 @@ export default function GamesPage() {
   const [page, setPage] = useState<GamePage>({ items: [], total: 0 });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [pgnText, setPgnText] = useState("");
+  const [importError, setImportError] = useState("");
+  const [isOwnGame, setIsOwnGame] = useState(true);
   const sync = useLichessSync();
   const refreshSync = sync.refresh;
   useEffect(() => {
@@ -51,17 +57,33 @@ export default function GamesPage() {
   useEffect(() => {
     void refreshSync();
   }, [refreshSync]);
-  async function importFile(file: File) {
+  async function importPgn(input: string | File) {
+    if (busy || sync.running) return;
     setBusy(true);
+    setImportError("");
     try {
-      const text = await file.text();
+      const text = typeof input === "string" ? input : await input.text();
+      if (!text.trim()) throw new Error("请粘贴 PGN 内容或选择文件");
       const username = await api.getSetting("lichess_username");
-      const games = parsePgnCollection(text, "local", username ?? undefined);
+      const games = parsePgnCollection(
+        text,
+        "local",
+        username ?? undefined,
+      ).map((game) => ({ ...game, isOwnGame }));
+      if (!games.length) throw new Error("没有可导入的对局");
       const added = await api.importGames(games);
-      setMessage(`已读取 ${games.length} 局，新增 ${added} 局`);
-      setPage(await api.listGames(filter));
+      const summary = `已读取 ${games.length} 局，新增 ${added} 局`;
+      setMessage(summary);
+      setImportOpen(false);
+      setPgnText("");
+      void api
+        .listGames(filter)
+        .then(setPage)
+        .catch((e) => {
+          setMessage(`${summary}；刷新列表失败：${e}`);
+        });
     } catch (e) {
-      setMessage(`导入失败：${e}`);
+      setImportError(`导入失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -89,7 +111,10 @@ export default function GamesPage() {
           <Button
             variant="soft"
             disabled={busy || sync.running}
-            onClick={() => fileInput.current?.click()}
+            onClick={() => {
+              setImportError("");
+              setImportOpen(true);
+            }}
           >
             <Upload size={16} /> 导入 PGN
           </Button>
@@ -101,7 +126,7 @@ export default function GamesPage() {
             accept=".pgn,.txt"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) void importFile(f);
+              if (f) void importPgn(f);
               e.target.value = "";
             }}
           />
@@ -127,6 +152,72 @@ export default function GamesPage() {
           </Button>
         </Flex>
       </Flex>
+      <Dialog.Root
+        open={importOpen}
+        onOpenChange={(open) => {
+          if (!busy) setImportOpen(open);
+        }}
+      >
+        <Dialog.Content maxWidth="600px">
+          <Dialog.Title>导入 PGN</Dialog.Title>
+          <Dialog.Description size="2" mb="4">
+            粘贴 PGN 文本，可一次导入多盘对局；也可以选择 PGN 文件。
+          </Dialog.Description>
+          <Box mb="3">
+            <Select
+              label="对局归属"
+              value={isOwnGame ? "own" : "other"}
+              disabled={busy}
+              onValueChange={(value) => setIsOwnGame(value === "own")}
+              options={[
+                { value: "own", label: "本人对局（计入统计）" },
+                { value: "other", label: "非本人对局（不计入统计）" },
+              ]}
+            />
+          </Box>
+          <TextArea
+            aria-label="PGN 内容"
+            placeholder={
+              '[Event "对局名称"]\n[White "白方"]\n[Black "黑方"]\n\n1. e4 e5 2. Nf3 Nc6 *'
+            }
+            rows={12}
+            className="font-mono resize-y"
+            value={pgnText}
+            disabled={busy}
+            onChange={(e) => {
+              setPgnText(e.target.value);
+              if (importError) setImportError("");
+            }}
+          />
+          {importError && (
+            <Callout.Root size="1" color="red" mt="3" role="alert">
+              <Callout.Text>{importError}</Callout.Text>
+            </Callout.Root>
+          )}
+          <Flex justify="between" gap="3" mt="4" wrap="wrap">
+            <Button
+              variant="soft"
+              disabled={busy || sync.running}
+              onClick={() => fileInput.current?.click()}
+            >
+              <Upload size={16} /> 选择文件
+            </Button>
+            <Flex gap="3">
+              <Dialog.Close>
+                <Button variant="soft" color="gray" disabled={busy}>
+                  取消
+                </Button>
+              </Dialog.Close>
+              <Button
+                disabled={busy || sync.running || !pgnText.trim()}
+                onClick={() => void importPgn(pgnText)}
+              >
+                {busy ? "正在导入…" : "导入"}
+              </Button>
+            </Flex>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
       {message && (
         <Callout.Root size="1" className="mb-4.5">
           <Callout.Text>{message}</Callout.Text>
@@ -219,6 +310,11 @@ export default function GamesPage() {
                 <Table.Cell>{g.playedAt?.slice(0, 10) ?? "—"}</Table.Cell>
                 <Table.Cell>
                   {g.userColor === "white" ? g.blackPlayer : g.whitePlayer}
+                  {!g.isOwnGame && (
+                    <Badge color="gray" ml="2">
+                      非本人
+                    </Badge>
+                  )}
                 </Table.Cell>
                 <Table.Cell>{g.userColor === "white" ? "白" : "黑"}</Table.Cell>
                 <Table.Cell>

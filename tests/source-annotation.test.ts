@@ -27,7 +27,7 @@ const puzzle: Puzzle = {
 };
 
 describe("来源局面注释", () => {
-  it("手动题显示当前局面的注释并保留 Markdown 内容", () => {
+  it("手动题显示当前局面的注释并保留原始文本", () => {
     expect(findSourceAnnotation(puzzle, game, annotations)).toBe(
       "**控制中心**，再发展棋子。",
     );

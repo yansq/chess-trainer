@@ -83,6 +83,9 @@ export default function StatisticsPage() {
           <Heading as="h1" size="8">
             开局统计
           </Heading>
+          <Text as="p" size="2" color="gray">
+            仅统计本人对局。
+          </Text>
         </Box>
         <SegmentedControl.Root
           value={view}
@@ -98,7 +101,7 @@ export default function StatisticsPage() {
           <Callout.Text>{error}</Callout.Text>
         </Callout.Root>
       )}
-      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
+      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-max [&>*]:flex-1">
         <OpponentTypeSelect value={opponentType} onChange={setOpponentType} />
         <Select
           label="执棋颜色"
@@ -127,7 +130,10 @@ export default function StatisticsPage() {
         ].map(({ label, value, setValue }) => (
           <Popover.Root key={label}>
             <Popover.Trigger>
-              <Button variant="surface" className="justify-start">
+              <Button
+                variant="surface"
+                className="justify-start whitespace-nowrap [&_svg]:shrink-0"
+              >
                 <CalendarDays size={14} />
                 {label}：{value || "不限"}
               </Button>

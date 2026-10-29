@@ -1,4 +1,4 @@
-import { Box, Button, Card, Flex, Grid } from "@radix-ui/themes";
+import { Box, Button, Card, ContextMenu, Flex, Grid } from "@radix-ui/themes";
 import { Fragment, useEffect, useRef } from "react";
 import { FileText } from "lucide-react";
 import { moveNumber, type ReviewMove, type ReviewTree } from "./review-tree";
@@ -13,6 +13,8 @@ type Props = {
   notes?: Record<string, string>;
   onSelect: (id: string | null) => void;
   onMainline: () => void;
+  onDelete: (id: string) => void;
+  deleting?: boolean;
 };
 
 export default function MoveList({
@@ -23,6 +25,8 @@ export default function MoveList({
   onRetry,
   onSelect,
   onMainline,
+  onDelete,
+  deleting = false,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
@@ -55,8 +59,9 @@ export default function MoveList({
         ? quality.category
         : null;
     const badge = category ? qualityBadges[category] : null;
-    return (
+    const moveButton = (
       <Button
+        disabled={deleting}
         size="1"
         variant={tree.currentId === move.id ? "soft" : "ghost"}
         color="gray"
@@ -87,7 +92,11 @@ export default function MoveList({
             title="有招法笔记"
             className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-note-badge px-0.5 text-eyebrow font-bold leading-none text-quality-ink"
           >
-            <FileText className="size-2.5" strokeWidth={2.5} aria-hidden="true" />
+            <FileText
+              className="size-2.5"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
           </span>
         )}
         <span
@@ -106,6 +115,22 @@ export default function MoveList({
           )}
         </span>
       </Button>
+    );
+    if (move.sourceMoveId !== null) return moveButton;
+    return (
+      <ContextMenu.Root>
+        <ContextMenu.Trigger>{moveButton}</ContextMenu.Trigger>
+        <ContextMenu.Content size="1">
+          <ContextMenu.Label>包含后续招法和笔记</ContextMenu.Label>
+          <ContextMenu.Item
+            color="red"
+            disabled={deleting}
+            onSelect={() => onDelete(move.id)}
+          >
+            删除分支
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Root>
     );
   }
   function variation(first: ReviewMove) {
@@ -196,7 +221,11 @@ export default function MoveList({
         <Box className="min-w-0 truncate" title={analysisStatus}>
           招法{" "}
           <span
-            title={hasBranches ? "试走分支仅在当前复盘页面保留" : undefined}
+            title={
+              hasBranches
+                ? "分支招法自动保存，重新打开对局可继续复盘"
+                : undefined
+            }
           >
             {analysisStatus ?? (hasBranches ? "主线与试走分支" : "主线")}
           </span>
@@ -212,7 +241,12 @@ export default function MoveList({
           </Button>
         )}
         {hasBranches && (
-          <Button size="1" variant="soft" onClick={onMainline}>
+          <Button
+            size="1"
+            variant="soft"
+            disabled={deleting}
+            onClick={onMainline}
+          >
             返回主线
           </Button>
         )}

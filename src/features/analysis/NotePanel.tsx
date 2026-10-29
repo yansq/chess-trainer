@@ -1,68 +1,64 @@
 import { Box, Button, Card, Flex, TextArea } from "@radix-ui/themes";
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import { api } from "../../shared/api";
 
 type Props = {
-  gameId: string;
-  moveId: string | null;
+  onSave: (content: string) => Promise<void>;
   heading: string;
   content: string;
-  temporary?: boolean;
   onSaved: (content: string) => void;
   onError: (message: string) => void;
+  disabled?: boolean;
 };
 export default function NotePanel({
-  gameId,
-  moveId,
+  onSave,
   heading,
   content,
-  temporary = false,
   onSaved,
   onError,
+  disabled = false,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   async function save() {
+    if (saving || disabled) return;
+    setSaving(true);
     try {
-      if (!temporary) await api.saveAnnotation(gameId, moveId, draft);
+      await onSave(draft);
       onSaved(draft);
       setEditing(false);
     } catch (e) {
       onError(String(e));
+    } finally {
+      setSaving(false);
     }
   }
   function startEditing() {
+    if (disabled) return;
     setDraft(content);
     setEditing(true);
   }
   return (
     <Card className="flex h-full min-h-0 flex-col overflow-hidden p-0">
-      <Box className="section-title shrink-0 border-b border-panel-edge px-3 py-1.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+      <Box className="section-title shrink-0 border-b border-panel-edge px-3 py-1.5 text-body-sm font-bold">
         {heading}
-        <span>Markdown</span>
       </Box>
       {editing ? (
-        <>
-          <TextArea
-            autoFocus
-            className="m-1.5 block min-h-9 w-note-field flex-1 resize-none leading-5"
-            rows={2}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="记录判断、候选招法、犯错原因…"
-          />
-        </>
+        <TextArea
+          disabled={saving || disabled}
+          autoFocus
+          className="m-1.5 block min-h-9 w-note-field flex-1 resize-none leading-5"
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="记录判断、候选招法、犯错原因…"
+        />
       ) : (
         <Box
-          className="min-h-0 flex-1 overflow-auto overscroll-contain cursor-text break-words [&_pre]:overflow-auto [&_img]:max-w-full p-2 text-body-sm leading-normal [&_p]:mb-2 [&_p]:mt-0"
+          className="min-h-0 flex-1 overflow-auto overscroll-contain cursor-text whitespace-pre-wrap wrap-anywhere p-2 text-body-sm leading-normal"
           onClick={startEditing}
         >
-          {content ? (
-            <ReactMarkdown>{content}</ReactMarkdown>
-          ) : (
-            <span className="text-muted">点击添加笔记…</span>
-          )}
+          {content || <span className="text-muted">点击添加笔记…</span>}
         </Box>
       )}
       <Flex
@@ -75,9 +71,10 @@ export default function NotePanel({
         <Button
           size="1"
           variant="soft"
+          disabled={saving || disabled}
           onClick={editing ? () => void save() : startEditing}
         >
-          {editing ? (temporary ? "暂存笔记" : "保存笔记") : "编辑笔记"}
+          {saving ? "保存中…" : editing ? "保存笔记" : "编辑笔记"}
         </Button>
       </Flex>
     </Card>

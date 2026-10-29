@@ -54,9 +54,14 @@ export default function PuzzlesPage() {
             题库
           </Heading>
         </Box>
-        <Button size="1" variant="solid" onClick={() => nav("/review")}>
-          开始今日训练
-        </Button>
+        <Flex wrap="wrap" gap="2">
+          <Button size="1" variant="soft" onClick={() => nav("/puzzles/new")}>
+            新建题目
+          </Button>
+          <Button size="1" variant="solid" onClick={() => nav("/review")}>
+            开始今日训练
+          </Button>
+        </Flex>
       </Flex>
       {message && (
         <Callout.Root size="1" className="mb-4.5">
@@ -149,7 +154,7 @@ export default function PuzzlesPage() {
           <Box className="px-5 py-15 text-center text-empty">
             {category
               ? "该分类暂无题目。"
-              : "题库为空。请到复盘页面，从一个局面创建题目。"}
+              : "题库为空。点击“新建题目”，或到复盘页面从局面创建题目。"}
           </Box>
         )}
       </Card>

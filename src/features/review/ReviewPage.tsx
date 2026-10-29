@@ -317,7 +317,11 @@ export default function ReviewPage() {
               <>
                 <Box className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
                   <strong>{correct ? "回答正确" : "本题答案"}</strong>
-                  {current.description && <p>{current.description}</p>}
+                  {current.description && (
+                    <p className="whitespace-pre-wrap wrap-anywhere">
+                      {current.description}
+                    </p>
+                  )}
                   <Box>
                     标准走法：
                     {current.expectedMoves
