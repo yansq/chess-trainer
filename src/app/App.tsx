@@ -8,6 +8,7 @@ import {
   Settings,
   Target,
   CalendarDays,
+  Eye,
 } from "lucide-react";
 const GamesPage = lazy(() => import("../features/games/GamesPage"));
 const AnalysisPage = lazy(() => import("../features/analysis/AnalysisPage"));
@@ -17,6 +18,9 @@ const PuzzleCreatePage = lazy(
 const PuzzleEditPage = lazy(() => import("../features/puzzles/PuzzleEditPage"));
 const PuzzlesPage = lazy(() => import("../features/puzzles/PuzzlesPage"));
 const ReviewPage = lazy(() => import("../features/review/ReviewPage"));
+const VisualizationPage = lazy(
+  () => import("../features/visualization/VisualizationPage"),
+);
 const StatisticsPage = lazy(
   () => import("../features/statistics/StatisticsPage"),
 );
@@ -25,6 +29,7 @@ const nav = [
   ["/games", "对局", Database],
   ["/puzzles", "题库", Target],
   ["/review", "今日训练", CalendarDays],
+  ["/visualization", "可视化训练", Eye],
   ["/statistics", "统计", ChartColumn],
   ["/settings", "设置", Settings],
 ] as const;
@@ -52,6 +57,8 @@ export default function App() {
             <NavLink
               key={path}
               to={path}
+              aria-label={label}
+              title={label}
               className={({ isActive }) =>
                 `flex items-center gap-3.25 rounded-nav px-3.75 py-3 text-sm no-underline max-[900px]:justify-center max-[900px]:[&>span]:hidden ${isActive || (path === "/games" && reviewingGame) ? "bg-nav-selected text-nav-selected-ink" : "text-nav-ink hover:bg-nav-hover"}`
               }
@@ -93,6 +100,7 @@ export default function App() {
               element={<PuzzleEditPage key={editingPuzzle?.params.id} />}
             />
             <Route path="/review" element={<ReviewPage />} />
+            <Route path="/visualization" element={<VisualizationPage />} />
             <Route path="/statistics" element={<StatisticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

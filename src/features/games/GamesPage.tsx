@@ -48,11 +48,33 @@ export default function GamesPage() {
   const [isOwnGame, setIsOwnGame] = useState(true);
   const sync = useLichessSync();
   const refreshSync = sync.refresh;
+  const pageCount = Math.ceil(page.total / filter.limit);
+  const currentPage = page.total
+    ? Math.floor(filter.offset / filter.limit) + 1
+    : 0;
   useEffect(() => {
+    let active = true;
     api
       .listGames(filter)
-      .then(setPage)
-      .catch((e) => setMessage(String(e)));
+      .then((result) => {
+        if (!active) return;
+        if (filter.offset > 0 && filter.offset >= result.total) {
+          setFilter((previous) => ({
+            ...previous,
+            offset:
+              Math.max(0, Math.ceil(result.total / filter.limit) - 1) *
+              filter.limit,
+          }));
+          return;
+        }
+        setPage(result);
+      })
+      .catch((e) => {
+        if (active) setMessage(String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, [filter, sync.revision]);
   useEffect(() => {
     void refreshSync();
@@ -347,6 +369,7 @@ export default function GamesPage() {
         <Flex
           align="center"
           justify="end"
+          wrap="wrap"
           className="gap-3.5 border-t border-panel-edge px-4.5 py-3.25 text-xs text-preview"
         >
           <Button
@@ -360,8 +383,7 @@ export default function GamesPage() {
             上一页
           </Button>
           <span>
-            {page.total ? Math.floor(filter.offset / filter.limit) + 1 : 0} /{" "}
-            {Math.ceil(page.total / filter.limit)}
+            {currentPage} / {pageCount}
           </span>
           <Button
             size="1"
@@ -373,6 +395,52 @@ export default function GamesPage() {
           >
             下一页
           </Button>
+          <Flex asChild align="center" gap="2">
+            <form
+              aria-label="页码跳转"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const target = Number(
+                  new FormData(e.currentTarget).get("page"),
+                );
+                if (
+                  Number.isSafeInteger(target) &&
+                  target >= 1 &&
+                  target <= pageCount
+                ) {
+                  setFilter((previous) => ({
+                    ...previous,
+                    offset: (target - 1) * previous.limit,
+                  }));
+                }
+              }}
+            >
+              <span>跳至</span>
+              <TextField.Root
+                key={`${currentPage}:${pageCount}`}
+                aria-label="跳转页码"
+                name="page"
+                type="number"
+                size="1"
+                className="w-16"
+                min={1}
+                max={Math.max(1, pageCount)}
+                step={1}
+                required
+                defaultValue={currentPage || ""}
+                disabled={!pageCount}
+              />
+              <span>页</span>
+              <Button
+                size="1"
+                variant="soft"
+                type="submit"
+                disabled={!pageCount}
+              >
+                跳转
+              </Button>
+            </form>
+          </Flex>
         </Flex>
       </Card>
     </>

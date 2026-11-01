@@ -356,7 +356,9 @@ export default function PuzzleCreatePage() {
                   position: stage === "setup" ? draft.pieces : currentFen,
                   boardOrientation: flipped ? "black" : "white",
                   allowDragging: !busy && !promotion && !answerError,
-                  allowDragOffBoard: stage === "setup",
+                  // Keep the overlay in pointer coordinates inside the contained board.
+                  // Off-board answer drops are rejected by onPieceDrop below.
+                  allowDragOffBoard: true,
                   showAnimations: stage !== "setup",
                   darkSquareStyle: {
                     backgroundColor: "var(--color-board-dark)",

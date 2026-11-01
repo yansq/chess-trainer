@@ -144,8 +144,13 @@ export default function StatisticsPage() {
                 <TextField.Root
                   type="date"
                   aria-label={label}
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
+                  defaultValue={value}
+                  onChange={(e) => {
+                    // Keep partially typed date segments in the native input.
+                    if (e.currentTarget.validity.valid) {
+                      setValue(e.currentTarget.value);
+                    }
+                  }}
                 />
                 <Popover.Close>
                   <Button size="1" variant="soft" onClick={() => setValue("")}>
