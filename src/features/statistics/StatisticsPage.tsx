@@ -12,7 +12,7 @@ import {
   Popover,
   Button,
 } from "@radix-ui/themes";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { api } from "../../shared/api";
 import type { OpeningStat, OpponentType } from "../../shared/types";
@@ -22,6 +22,89 @@ import {
   groupOpeningFamilies,
   type OpeningFamilyStat,
 } from "./opening-families";
+function isValidDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number(value.slice(0, 4)) < 1)
+    return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value
+  );
+}
+
+function DateFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const picker = useRef<HTMLInputElement>(null);
+  const valid = isValidDate(draft);
+
+  function update(next: string) {
+    setDraft(next);
+    if (!next || isValidDate(next)) onChange(next);
+  }
+
+  return (
+    <Popover.Root onOpenChange={(open) => open && setDraft(value)}>
+      <Popover.Trigger>
+        <Button
+          variant="surface"
+          className="justify-start whitespace-nowrap [&_svg]:shrink-0"
+        >
+          <CalendarDays size={14} />
+          {label}：{value || "不限"}
+        </Button>
+      </Popover.Trigger>
+      <Popover.Content size="1">
+        <Flex direction="column" gap="2">
+          <Text size="2">{label}</Text>
+          <Flex gap="2" align="center">
+            <TextField.Root
+              aria-label={label}
+              placeholder="YYYY-MM-DD"
+              value={draft}
+              onChange={(e) => update(e.target.value)}
+            />
+            <Box className="relative">
+              <input
+                ref={picker}
+                type="date"
+                aria-label={`通过日历选择${label}`}
+                tabIndex={-1}
+                className="pointer-events-none absolute h-px w-px opacity-0"
+                value={value}
+                onInput={(e) => update(e.currentTarget.value)}
+              />
+              <Button
+                variant="soft"
+                aria-label={`打开${label}日历`}
+                onClick={() => picker.current?.showPicker()}
+              >
+                <CalendarDays size={16} />
+              </Button>
+            </Box>
+          </Flex>
+          <Text size="1" color={draft && !valid ? "orange" : "gray"}>
+            {draft && !valid
+              ? "尚未应用，请输入有效日期（YYYY-MM-DD）。"
+              : "可直接输入日期，例如 2026-07-01。"}
+          </Text>
+          <Popover.Close>
+            <Button size="1" variant="soft" onClick={() => update("")}>
+              不限日期
+            </Button>
+          </Popover.Close>
+        </Flex>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
 export default function StatisticsPage() {
   const [view, setView] = useState<"family" | "detail">("family");
   const [opponentType, setOpponentType] = useState<OpponentType>("human");
@@ -128,38 +211,12 @@ export default function StatisticsPage() {
           { label: "开始日期", value: from, setValue: setFrom },
           { label: "结束日期", value: to, setValue: setTo },
         ].map(({ label, value, setValue }) => (
-          <Popover.Root key={label}>
-            <Popover.Trigger>
-              <Button
-                variant="surface"
-                className="justify-start whitespace-nowrap [&_svg]:shrink-0"
-              >
-                <CalendarDays size={14} />
-                {label}：{value || "不限"}
-              </Button>
-            </Popover.Trigger>
-            <Popover.Content size="1">
-              <Flex direction="column" gap="2">
-                <Text size="2">{label}</Text>
-                <TextField.Root
-                  type="date"
-                  aria-label={label}
-                  defaultValue={value}
-                  onChange={(e) => {
-                    // Keep partially typed date segments in the native input.
-                    if (e.currentTarget.validity.valid) {
-                      setValue(e.currentTarget.value);
-                    }
-                  }}
-                />
-                <Popover.Close>
-                  <Button size="1" variant="soft" onClick={() => setValue("")}>
-                    不限日期
-                  </Button>
-                </Popover.Close>
-              </Flex>
-            </Popover.Content>
-          </Popover.Root>
+          <DateFilter
+            key={label}
+            label={label}
+            value={value}
+            onChange={setValue}
+          />
         ))}
       </Card>
       <Grid
