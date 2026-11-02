@@ -42,15 +42,12 @@ export default function PuzzlesPage() {
       <Flex
         align="center"
         justify="between"
-        mb="7"
+        mb="5"
         gap="5"
         className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
         <Box>
-          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-            PUZZLE LIBRARY
-          </Box>
-          <Heading as="h1" size="8">
+          <Heading as="h1" size="7">
             题库
           </Heading>
         </Box>
@@ -64,7 +61,7 @@ export default function PuzzlesPage() {
         </Flex>
       </Flex>
       {message && (
-        <Callout.Root size="1" className="mb-4.5">
+        <Callout.Root size="1" className="mb-5">
           <Callout.Text>{message}</Callout.Text>
         </Callout.Root>
       )}

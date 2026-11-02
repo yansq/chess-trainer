@@ -1,3 +1,4 @@
+mod chesscom;
 mod commands;
 mod db;
 mod engine;
@@ -39,6 +40,10 @@ pub fn run() {
             commands::get_setting,
             commands::set_setting,
             commands::opening_stats,
+            commands::chesscom_test,
+            commands::chesscom_archives,
+            commands::chesscom_month,
+            commands::import_chesscom_batch,
             commands::lichess_test,
             commands::lichess_export_batch,
             commands::lichess_refresh_games,

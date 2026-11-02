@@ -293,9 +293,6 @@ export default function PuzzleCreatePage() {
     >
       <Flex justify="between" align="center" gap="3" className="shrink-0">
         <Box>
-          <Box className="text-eyebrow font-bold tracking-eyebrow text-accent-ink">
-            NEW PUZZLE
-          </Box>
           <Heading as="h1" size="6">
             新建题目
           </Heading>

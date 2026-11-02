@@ -192,10 +192,7 @@ export default function ReviewPage() {
         className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
         <Box>
-          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-            SPACED REVIEW
-          </Box>
-          <Heading as="h1" size="8">
+          <Heading as="h1" size="7">
             今日训练
           </Heading>
           <p>到期 {queue.length} 题</p>
@@ -203,7 +200,7 @@ export default function ReviewPage() {
       </Flex>
       <DueForecast refreshKey={forecastRefresh} />
       {message && !current && (
-        <Callout.Root size="1" className="mb-4.5">
+        <Callout.Root size="1" className="mb-5">
           <Callout.Text>{message}</Callout.Text>
         </Callout.Root>
       )}
@@ -247,7 +244,7 @@ export default function ReviewPage() {
           </Box>
           <Card className="p-7 [&_h2]:text-panel-title [&_p]:text-training-description">
             <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-              PUZZLE {queue.length} REMAINING
+              剩余 {queue.length} 道题目
             </Box>
             <Heading size="6" mt="2" mb="3">
               {current.title}
@@ -315,7 +312,7 @@ export default function ReviewPage() {
             )}
             {revealed && (
               <>
-                <Box className="my-7.5 rounded-lg bg-answer p-3.75 leading-answer">
+                <Box className="my-8 rounded-lg bg-answer p-4 leading-answer">
                   <strong>{correct ? "回答正确" : "本题答案"}</strong>
                   {current.description && (
                     <p className="whitespace-pre-wrap wrap-anywhere">
@@ -345,7 +342,7 @@ export default function ReviewPage() {
                 <SourceAnnotation key={current.id} puzzle={current} />
               </>
             )}
-            <Flex wrap="wrap" gap="2" className="mt-7.5">
+            <Flex wrap="wrap" gap="2" className="mt-8">
               {(["Again", "Hard", "Good", "Easy"] as const).map((r) => (
                 <Button
                   size="2"

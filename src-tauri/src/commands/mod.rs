@@ -127,6 +127,7 @@ pub fn opening_stats(
     from: Option<String>,
     to: Option<String>,
     opponent_type: Option<OpponentType>,
+    source: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     repository::opening_stats(
         &*db(&state)?,
@@ -135,6 +136,7 @@ pub fn opening_stats(
         from.as_deref(),
         to.as_deref(),
         opponent_type.unwrap_or_default(),
+        source.as_deref(),
     )
 }
 #[tauri::command]
@@ -254,4 +256,29 @@ pub fn save_lichess_token(username: String, token: String) -> Result<(), String>
 #[tauri::command]
 pub fn engine_validate(path: String) -> Result<(), String> {
     crate::engine::validate(&path)
+}
+
+#[tauri::command]
+pub async fn chesscom_test(username: String) -> Result<(), String> {
+    crate::chesscom::test_connection(&username).await
+}
+#[tauri::command]
+pub async fn chesscom_archives(username: String) -> Result<Vec<String>, String> {
+    crate::chesscom::archives(&username).await
+}
+#[tauri::command]
+pub async fn chesscom_month(
+    username: String,
+    month: String,
+) -> Result<Vec<crate::chesscom::Game>, String> {
+    crate::chesscom::month(&username, &month).await
+}
+#[tauri::command]
+pub fn import_chesscom_batch(
+    state: State<Database>,
+    username: String,
+    games: Vec<Game>,
+    checkpoint: repository::ChessComCheckpoint,
+) -> Result<repository::ChessComCheckpoint, String> {
+    repository::import_chesscom_batch(&mut *db(&state)?, &username, games, checkpoint)
 }

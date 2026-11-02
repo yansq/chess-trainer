@@ -39,13 +39,13 @@ export default function App() {
   const editingPuzzle = useMatch("/puzzles/:id/edit");
   return (
     <Grid className="sidebar-wide h-dvh grid-cols-shell overflow-hidden max-[900px]:sidebar-compact">
-      <aside className="fixed inset-y-0 left-0 flex h-dvh w-sidebar flex-col overflow-y-auto overscroll-none border-r border-sidebar-edge bg-sidebar px-3.5 py-7">
+      <aside className="fixed inset-y-0 left-0 flex h-dvh w-sidebar flex-col overflow-y-auto overscroll-none border-r border-sidebar-edge bg-sidebar px-3 py-6">
         <Flex
           align="center"
           gap="3"
           px="3"
           pt="1"
-          className="pb-8.5 text-brand-ink [&_strong]:block [&_strong]:text-brand-ink [&_strong]:tracking-brand [&_strong]:text-heading [&_small]:mt-1 [&_small]:block [&_small]:text-micro [&_small]:tracking-label [&_small]:text-brand-muted max-[900px]:px-1.25 max-[900px]:pb-7.5 max-[900px]:[&>div]:hidden"
+          className="pb-6 text-brand-ink [&_strong]:block [&_strong]:text-brand-ink [&_strong]:tracking-brand [&_strong]:text-heading [&_small]:mt-1 [&_small]:block [&_small]:text-micro [&_small]:tracking-label [&_small]:text-brand-muted max-[900px]:px-1.25 max-[900px]:pb-8 max-[900px]:[&>div]:hidden"
         >
           <ChessKnight size={24} />
           <Box>
@@ -60,7 +60,7 @@ export default function App() {
               aria-label={label}
               title={label}
               className={({ isActive }) =>
-                `flex items-center gap-3.25 rounded-nav px-3.75 py-3 text-sm no-underline max-[900px]:justify-center max-[900px]:[&>span]:hidden ${isActive || (path === "/games" && reviewingGame) ? "bg-nav-selected text-nav-selected-ink" : "text-nav-ink hover:bg-nav-hover"}`
+                `flex items-center gap-3 rounded-nav px-3 py-2 text-sm no-underline max-[900px]:justify-center max-[900px]:[&>span]:hidden ${isActive || (path === "/games" && reviewingGame) ? "bg-nav-selected text-nav-selected-ink" : "text-nav-ink hover:bg-nav-hover"}`
               }
             >
               <Icon size={18} />
@@ -70,7 +70,7 @@ export default function App() {
         </nav>
       </aside>
       <main
-        className={` col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-400 overflow-auto overscroll-contain ${reviewingGame || editingPuzzle || creatingPuzzle ? `!overflow-hidden px-6 py-5 max-[1150px]:px-5 ${creatingPuzzle ? "max-[760px]:!overflow-auto" : ""}` : "px-10.5 pt-8.75 pb-12.5 max-[1150px]:px-6.25 max-[1150px]:py-7"}`}
+        className={` col-start-2 mx-auto h-full min-h-0 w-full min-w-0 max-w-400 overflow-auto overscroll-contain ${reviewingGame || editingPuzzle || creatingPuzzle ? `!overflow-hidden px-6 py-5 max-[1150px]:px-5 ${creatingPuzzle ? "max-[760px]:!overflow-auto" : ""}` : "px-8 pt-6 pb-8 max-[1150px]:px-6 max-[1150px]:py-6"}`}
       >
         <Suspense
           fallback={

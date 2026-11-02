@@ -1,3 +1,30 @@
+export type GameSource = "local" | "lichess" | "chesscom";
+export const GAME_SOURCES = [
+  { value: "lichess", label: "Lichess" },
+  { value: "chesscom", label: "Chess" },
+  { value: "local", label: "PGN 导入" },
+] as const;
+export function gameSourceLabel(source: string): string {
+  return GAME_SOURCES.find((item) => item.value === source)?.label ?? source;
+}
+export interface ChessComGame {
+  url: string;
+  pgn: string;
+  rules: string;
+  time_class: string;
+  time_control: string;
+  end_time: number;
+  rated: boolean;
+  white: { username: string; result: string };
+  black: { username: string; result: string };
+}
+export interface ChessComSyncState {
+  completedMonths: string[];
+  pending: string[] | null;
+  read: number;
+  added: number;
+}
+
 export interface Move {
   id: string;
   gameId: string;
@@ -51,6 +78,7 @@ export interface LichessSyncState {
 }
 export interface GameFilter {
   opponentType: OpponentType;
+  source?: GameSource | null;
   color: string | null;
   result: string | null;
   speed: string | null;

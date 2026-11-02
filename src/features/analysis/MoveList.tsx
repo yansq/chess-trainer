@@ -216,7 +216,7 @@ export default function MoveList({
         justify="between"
         px="3"
         gap="2"
-        className="section-title shrink-0 border-b border-panel-edge py-2.5 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink"
+        className="section-title shrink-0 border-b border-panel-edge py-3 text-body-sm font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink"
       >
         <Box className="min-w-0 truncate" title={analysisStatus}>
           招法{" "}

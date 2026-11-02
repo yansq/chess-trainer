@@ -44,6 +44,7 @@ import { playMoveSound, playSound } from "../../shared/audio/move-sound";
 import { classifyMove, type Candidate } from "./blunders";
 import NotePanel from "./NotePanel";
 import EvaluationBar from "./EvaluationBar";
+import EvaluationChart from "./EvaluationChart";
 import { positionEvaluation } from "./evaluation";
 import {
   qualityBadges,
@@ -610,9 +611,6 @@ export default function AnalysisPage() {
         className="shrink-0 [&_h1]:truncate [&_p]:truncate [&_h1]:my-1 [&_h1]:text-2xl [&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
         <Box className="min-w-0">
-          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-            GAME REVIEW
-          </Box>
           <Heading as="h1" size="5">
             {game.whitePlayer} <span className="text-muted">vs</span>{" "}
             {game.blackPlayer}
@@ -927,7 +925,7 @@ export default function AnalysisPage() {
               {engineEnabled && (
                 <Box
                   p="2"
-                  className="h-47 overflow-auto overscroll-contain text-body-sm"
+                  className="h-44 overflow-auto overscroll-contain text-body-sm"
                 >
                   {engine && engine.fen === fen ? (
                     <ol
@@ -990,6 +988,13 @@ export default function AnalysisPage() {
                 </Box>
               )}
             </Card>
+            <EvaluationChart
+              moves={game.moves}
+              initialFen={review.initialFen}
+              analysis={preanalysis}
+              currentId={review.currentId}
+              onSelect={(moveId) => changeReview(selectReviewMove(review, moveId))}
+            />
             <MoveList
               tree={review}
               qualities={qualities}
@@ -1163,7 +1168,7 @@ export default function AnalysisPage() {
                 justify="end"
                 px="4"
                 py="3"
-                className="shrink-0 gap-2.25 border-t border-panel-edge"
+                className="shrink-0 gap-2 border-t border-panel-edge"
               >
                 <Button
                   size="1"

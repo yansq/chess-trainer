@@ -15,13 +15,16 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
+import { gameSourceLabel } from "../../shared/types";
+import { GameSourceSelect } from "../../shared/ui/GameSourceSelect";
 import type { GameFilter, GamePage } from "../../shared/types";
 import { parsePgnCollection } from "./pgn";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
 import { Select } from "../../shared/ui/select";
-import { useLichessSync } from "./sync-store";
+import { useGameSync } from "./sync-store";
 const initial: GameFilter = {
   opponentType: "human",
+  source: null,
   color: null,
   result: null,
   speed: null,
@@ -46,7 +49,7 @@ export default function GamesPage() {
   const [pgnText, setPgnText] = useState("");
   const [importError, setImportError] = useState("");
   const [isOwnGame, setIsOwnGame] = useState(true);
-  const sync = useLichessSync();
+  const sync = useGameSync();
   const refreshSync = sync.refresh;
   const pageCount = Math.ceil(page.total / filter.limit);
   const currentPage = page.total
@@ -86,11 +89,15 @@ export default function GamesPage() {
     try {
       const text = typeof input === "string" ? input : await input.text();
       if (!text.trim()) throw new Error("请粘贴 PGN 内容或选择文件");
-      const username = await api.getSetting("lichess_username");
+      const [username, chessComUsername] = await Promise.all([
+        api.getSetting("lichess_username"),
+        api.getSetting("chesscom_username"),
+      ]);
       const games = parsePgnCollection(
         text,
         "local",
         username ?? undefined,
+        chessComUsername ?? undefined,
       ).map((game) => ({ ...game, isOwnGame }));
       if (!games.length) throw new Error("没有可导入的对局");
       const added = await api.importGames(games);
@@ -117,19 +124,16 @@ export default function GamesPage() {
       <Flex
         align="center"
         justify="between"
-        mb="7"
+        mb="5"
         gap="5"
         className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
         <Box>
-          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-            YOUR GAMES
-          </Box>
-          <Heading as="h1" size="8">
+          <Heading as="h1" size="7">
             对局
           </Heading>
         </Box>
-        <Flex className="gap-2.5">
+        <Flex className="gap-3">
           <Button
             variant="soft"
             disabled={busy || sync.running}
@@ -168,7 +172,7 @@ export default function GamesPage() {
               ? "正在暂停…"
               : sync.running
                 ? "暂停同步"
-                : sync.checkpoint?.pending
+                : sync.pending
                   ? "继续同步"
                   : "同步对局"}
           </Button>
@@ -241,16 +245,20 @@ export default function GamesPage() {
         </Dialog.Content>
       </Dialog.Root>
       {message && (
-        <Callout.Root size="1" className="mb-4.5">
+        <Callout.Root size="1" className="mb-5">
           <Callout.Text>{message}</Callout.Text>
         </Callout.Root>
       )}
       {sync.message && (
-        <Callout.Root size="1" className="mb-4.5" role="status">
+        <Callout.Root size="1" className="mb-5" role="status">
           <Callout.Text>{sync.message}</Callout.Text>
         </Callout.Root>
       )}
-      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-31.25 [&>*]:flex-1">
+      <Card className="mb-5 flex flex-wrap gap-3 p-4 [&>*]:min-w-31.25 [&>*]:flex-1">
+        <GameSourceSelect
+          value={filter.source ?? null}
+          onChange={(source) => change({ source })}
+        />
         <OpponentTypeSelect
           value={filter.opponentType}
           onChange={(opponentType) => change({ opponentType })}
@@ -295,9 +303,11 @@ export default function GamesPage() {
           options={[
             { value: "", label: "全部时限" },
             { value: "bullet", label: "Bullet" },
+            { value: "bullet", label: "Bullet" },
             { value: "blitz", label: "Blitz" },
             { value: "rapid", label: "Rapid" },
             { value: "classical", label: "Classical" },
+            { value: "correspondence", label: "通信棋" },
           ]}
         />
         <TextField.Root
@@ -307,14 +317,14 @@ export default function GamesPage() {
         />
       </Card>
       <Card className="overflow-hidden p-0">
-        <Box className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+        <Box className="border-b border-panel-edge px-5 py-4 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           对局记录 <span>{page.total} 局</span>
         </Box>
         <Table.Root>
           <Table.Header>
             <Table.Row>
+              <Table.ColumnHeaderCell>来源</Table.ColumnHeaderCell>
               <Table.ColumnHeaderCell>日期</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>对手</Table.ColumnHeaderCell>
               <Table.ColumnHeaderCell>执棋</Table.ColumnHeaderCell>
               <Table.ColumnHeaderCell>结果</Table.ColumnHeaderCell>
               <Table.ColumnHeaderCell>开局</Table.ColumnHeaderCell>
@@ -329,15 +339,15 @@ export default function GamesPage() {
                 key={g.id}
                 onClick={() => nav(`/analysis/${encodeURIComponent(g.id)}`)}
               >
-                <Table.Cell>{g.playedAt?.slice(0, 10) ?? "—"}</Table.Cell>
-                <Table.Cell>
-                  {g.userColor === "white" ? g.blackPlayer : g.whitePlayer}
+                <Table.Cell className="whitespace-nowrap">
+                  {gameSourceLabel(g.source)}
                   {!g.isOwnGame && (
                     <Badge color="gray" ml="2">
                       非本人
                     </Badge>
                   )}
                 </Table.Cell>
+                <Table.Cell>{g.playedAt?.slice(0, 10) ?? "—"}</Table.Cell>
                 <Table.Cell>{g.userColor === "white" ? "白" : "黑"}</Table.Cell>
                 <Table.Cell>
                   <Badge
@@ -363,17 +373,17 @@ export default function GamesPage() {
         </Table.Root>
         {page.items.length === 0 && (
           <Box className="px-5 py-15 text-center text-empty">
-            当前筛选下暂无对局。可调整筛选、导入 PGN 或同步 Lichess。
+            当前筛选下暂无对局。可调整筛选、导入 PGN 或同步平台对局。
           </Box>
         )}
         <Flex
           align="center"
           justify="end"
           wrap="wrap"
-          className="gap-3.5 border-t border-panel-edge px-4.5 py-3.25 text-xs text-preview"
+          className="gap-4 border-t border-panel-edge px-5 py-3 text-xs text-preview"
         >
           <Button
-            size="1"
+            size="2"
             variant="soft"
             disabled={filter.offset === 0}
             onClick={() =>
@@ -386,7 +396,7 @@ export default function GamesPage() {
             {currentPage} / {pageCount}
           </span>
           <Button
-            size="1"
+            size="2"
             variant="soft"
             disabled={filter.offset + filter.limit >= page.total}
             onClick={() =>
@@ -421,8 +431,8 @@ export default function GamesPage() {
                 aria-label="跳转页码"
                 name="page"
                 type="number"
-                size="1"
-                className="w-16"
+                size="2"
+                className="w-20"
                 min={1}
                 max={Math.max(1, pageCount)}
                 step={1}
@@ -432,7 +442,7 @@ export default function GamesPage() {
               />
               <span>页</span>
               <Button
-                size="1"
+                size="2"
                 variant="soft"
                 type="submit"
                 disabled={!pageCount}

@@ -15,7 +15,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { api } from "../../shared/api";
-import type { OpeningStat, OpponentType } from "../../shared/types";
+import { GameSourceSelect } from "../../shared/ui/GameSourceSelect";
+import type { GameSource, OpeningStat, OpponentType } from "../../shared/types";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
 import { Select } from "../../shared/ui/select";
 import {
@@ -50,7 +51,19 @@ function DateFilter({
   }
 
   return (
-    <Popover.Root onOpenChange={(open) => open && setDraft(value)}>
+    <Popover.Root
+      onOpenChange={(open) => {
+        if (!open) return;
+        if (value) {
+          setDraft(value);
+        } else {
+          const now = new Date();
+          update(
+            `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+          );
+        }
+      }}
+    >
       <Popover.Trigger>
         <Button
           variant="surface"
@@ -108,6 +121,7 @@ function DateFilter({
 export default function StatisticsPage() {
   const [view, setView] = useState<"family" | "detail">("family");
   const [opponentType, setOpponentType] = useState<OpponentType>("human");
+  const [source, setSource] = useState<GameSource | null>(null);
   const [color, setColor] = useState<string | null>(null);
   const [speed, setSpeed] = useState<string | null>(null);
   const [from, setFrom] = useState("");
@@ -136,6 +150,7 @@ export default function StatisticsPage() {
         from || null,
         to ? `${to}T23:59:59Z` : null,
         opponentType,
+        source,
       )
       .then((result) => {
         if (active) {
@@ -149,21 +164,18 @@ export default function StatisticsPage() {
     return () => {
       active = false;
     };
-  }, [color, speed, from, to, opponentType]);
+  }, [color, speed, from, to, opponentType, source]);
   return (
     <>
       <Flex
         align="center"
         justify="between"
-        mb="7"
+        mb="5"
         gap="5"
         className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
         <Box>
-          <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-            PERFORMANCE
-          </Box>
-          <Heading as="h1" size="8">
+          <Heading as="h1" size="7">
             开局统计
           </Heading>
           <Text as="p" size="2" color="gray">
@@ -180,11 +192,12 @@ export default function StatisticsPage() {
         </SegmentedControl.Root>
       </Flex>
       {error && (
-        <Callout.Root size="1" className="mb-4.5">
+        <Callout.Root size="1" className="mb-5">
           <Callout.Text>{error}</Callout.Text>
         </Callout.Root>
       )}
-      <Card className="mb-4.5 flex flex-wrap gap-2.5 p-3.5 [&>*]:min-w-max [&>*]:flex-1">
+      <Card className="mb-5 flex flex-wrap gap-3 p-4 [&>*]:min-w-max [&>*]:flex-1">
+        <GameSourceSelect value={source} onChange={setSource} />
         <OpponentTypeSelect value={opponentType} onChange={setOpponentType} />
         <Select
           label="执棋颜色"
@@ -202,9 +215,11 @@ export default function StatisticsPage() {
           onValueChange={(speed) => setSpeed(speed || null)}
           options={[
             { value: "", label: "全部时限" },
+            { value: "bullet", label: "Bullet" },
             { value: "blitz", label: "Blitz" },
             { value: "rapid", label: "Rapid" },
             { value: "classical", label: "Classical" },
+            { value: "correspondence", label: "通信棋" },
           ]}
         />
         {[
@@ -265,7 +280,7 @@ export default function StatisticsPage() {
         </Card>
       </Grid>
       <Card className="overflow-hidden p-0">
-        <Box className="border-b border-panel-edge px-5 py-4.25 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
+        <Box className="border-b border-panel-edge px-5 py-4 text-body font-bold [&_span]:ml-1.75 [&_span]:text-xs [&_span]:font-normal [&_span]:text-caption-ink">
           {isFamily ? "开局大类" : "开局细分"}
           <span>
             {rows.length} {isFamily ? "类" : "项"} · {total} 局
@@ -280,12 +295,18 @@ export default function StatisticsPage() {
               <Table.ColumnHeaderCell>
                 {isFamily ? "开局大类" : "开局"}
               </Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>样本</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>胜</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>和</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>负</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>胜率</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>得分率</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">
+                样本
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">胜</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">和</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">负</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">
+                胜率
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell justify="end">
+                得分率
+              </Table.ColumnHeaderCell>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -293,12 +314,16 @@ export default function StatisticsPage() {
               <Table.Row key={isFamily ? s.opening : `${s.eco}-${s.opening}`}>
                 {!isFamily && <Table.Cell>{s.eco}</Table.Cell>}
                 <Table.Cell>{s.opening}</Table.Cell>
-                <Table.Cell>{s.total}</Table.Cell>
-                <Table.Cell>{s.wins}</Table.Cell>
-                <Table.Cell>{s.draws}</Table.Cell>
-                <Table.Cell>{s.losses}</Table.Cell>
-                <Table.Cell>{(s.winRate * 100).toFixed(1)}%</Table.Cell>
-                <Table.Cell>{(s.scoreRate * 100).toFixed(1)}%</Table.Cell>
+                <Table.Cell justify="end">{s.total}</Table.Cell>
+                <Table.Cell justify="end">{s.wins}</Table.Cell>
+                <Table.Cell justify="end">{s.draws}</Table.Cell>
+                <Table.Cell justify="end">{s.losses}</Table.Cell>
+                <Table.Cell justify="end">
+                  {(s.winRate * 100).toFixed(1)}%
+                </Table.Cell>
+                <Table.Cell justify="end">
+                  {(s.scoreRate * 100).toFixed(1)}%
+                </Table.Cell>
               </Table.Row>
             ))}
           </Table.Body>

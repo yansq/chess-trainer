@@ -9,8 +9,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <Theme
       appearance="dark"
       accentColor="gray"
-      grayColor="sage"
-      radius="large"
+      grayColor="gray"
+      radius="medium"
       className="h-full min-h-0"
     >
       <BrowserRouter>

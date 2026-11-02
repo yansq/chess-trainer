@@ -50,6 +50,12 @@ pub fn migrate(db: &Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", 6)?;
         tx.commit()?;
     }
+    if version < 7 {
+        let tx = db.unchecked_transaction()?;
+        super::openings::reclassify_existing(&tx)?;
+        tx.pragma_update(None, "user_version", 7)?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -161,7 +167,7 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            7
         );
     }
     #[test]
@@ -187,7 +193,8 @@ mod tests {
                 None,
                 None,
                 None,
-                super::super::repository::OpponentType::All
+                super::super::repository::OpponentType::All,
+                None
             )
             .unwrap()[0]["total"],
             1
@@ -203,7 +210,7 @@ mod tests {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM pragma_table_info('review_schedules') WHERE name IN ('total_attempts','correct_count')", [], |r| r.get(0))
             .unwrap();

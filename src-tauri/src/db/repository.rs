@@ -62,6 +62,7 @@ impl OpponentType {
 pub struct GameFilter {
     #[serde(default)]
     pub opponent_type: OpponentType,
+    pub source: Option<String>,
     pub color: Option<String>,
     pub result: Option<String>,
     pub speed: Option<String>,
@@ -204,10 +205,61 @@ pub fn import_sync_batch(
     tx.commit().map_err(err)?;
     Ok(checkpoint)
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChessComCheckpoint {
+    pub completed_months: Vec<String>,
+    pub pending: Option<Vec<String>>,
+    pub read: usize,
+    pub added: usize,
+}
+pub fn import_chesscom_batch(
+    db: &mut Connection,
+    username: &str,
+    games: Vec<Game>,
+    mut checkpoint: ChessComCheckpoint,
+) -> Result<ChessComCheckpoint, String> {
+    if !crate::chesscom::valid_username(username)
+        || checkpoint
+            .completed_months
+            .iter()
+            .chain(checkpoint.pending.iter().flatten())
+            .any(|m| !crate::chesscom::valid_month(m))
+        || games.iter().any(|g| {
+            g.source != "chesscom"
+                || g.external_game_id
+                    .as_ref()
+                    .is_none_or(|id| g.id != format!("chesscom:{id}"))
+                || !(g.white_player.eq_ignore_ascii_case(username)
+                    || g.black_player.eq_ignore_ascii_case(username))
+        })
+    {
+        return Err("Chess.com 同步数据或账号无效，已保留同步进度".into());
+    }
+    let tx = db.transaction().map_err(err)?;
+    checkpoint.added += write_games(&tx, games, false)?;
+    set_setting(
+        &tx,
+        &format!("chesscom_sync_v1:{}", username.to_ascii_lowercase()),
+        &serde_json::to_string(&checkpoint).map_err(err)?,
+    )?;
+    tx.commit().map_err(err)?;
+    Ok(checkpoint)
+}
+
 fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Result<usize, String> {
     let mut count = 0;
-    for g in games {
-        let existing: Option<String> = if let Some(ref external) = g.external_game_id {
+    for mut g in games {
+        let opening = super::openings::classify(
+            g.moves
+                .iter()
+                .rev()
+                .map(|m| m.fen_after.as_str())
+                .chain(g.moves.first().map(|m| m.fen_before.as_str())),
+        );
+        g.eco = opening.map(|entry| entry.0.clone());
+        g.opening_name = opening.map(|entry| entry.1.clone());
+        let mut existing: Option<String> = if let Some(ref external) = g.external_game_id {
             tx.query_row(
                 "SELECT id FROM games WHERE source=?1 AND external_game_id=?2",
                 params![g.source, external],
@@ -220,6 +272,27 @@ fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Res
                 .optional()
                 .map_err(err)?
         };
+        // Adopt identifiable older PGN imports without changing their IDs or notes.
+        if existing.is_none() && g.source == "chesscom" {
+            if let Some(external) = &g.external_game_id {
+                let needle = external.rsplit(':').next().unwrap_or(external);
+                let mut stmt = tx
+                    .prepare("SELECT id,pgn FROM games WHERE source='local' AND pgn LIKE ?1")
+                    .map_err(err)?;
+                let candidates = stmt
+                    .query_map([format!("%{needle}%")], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(err)?;
+                for item in candidates {
+                    let (id, pgn) = item.map_err(err)?;
+                    if crate::chesscom::pgn_game_id(&pgn).as_ref() == Some(external) {
+                        existing = Some(id);
+                        break;
+                    }
+                }
+            }
+        }
         let id = existing.unwrap_or_else(|| g.id.clone());
         let fresh: bool = tx
             .query_row("SELECT 1 FROM games WHERE id=?1", [&id], |r| {
@@ -229,7 +302,7 @@ fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Res
             .map_err(err)?
             .is_none();
         let is_bot = super::game_kind::is_bot_game(&g.pgn, &g.white_player, &g.black_player);
-        tx.execute("INSERT INTO games(id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,is_bot,is_own_game,last_synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET white_player=excluded.white_player,black_player=excluded.black_player,user_color=COALESCE(excluded.user_color,games.user_color),result=excluded.result,played_at=excluded.played_at,time_control=excluded.time_control,speed=excluded.speed,rated=excluded.rated,eco=excluded.eco,opening_name=excluded.opening_name,pgn=excluded.pgn,is_bot=excluded.is_bot,is_own_game=CASE WHEN ?17 THEN excluded.is_own_game ELSE games.is_own_game END,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",params![id,g.source,g.external_game_id,g.white_player,g.black_player,g.user_color,g.result,g.played_at,g.time_control,g.speed,g.rated,g.eco,g.opening_name,g.pgn,is_bot,if update_ownership { g.is_own_game } else { true },update_ownership]).map_err(err)?;
+        tx.execute("INSERT INTO games(id,source,external_game_id,white_player,black_player,user_color,result,played_at,time_control,speed,rated,eco,opening_name,pgn,is_bot,is_own_game,last_synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET source=excluded.source,external_game_id=COALESCE(excluded.external_game_id,games.external_game_id),white_player=excluded.white_player,black_player=excluded.black_player,user_color=COALESCE(excluded.user_color,games.user_color),result=excluded.result,played_at=excluded.played_at,time_control=excluded.time_control,speed=excluded.speed,rated=excluded.rated,eco=excluded.eco,opening_name=excluded.opening_name,pgn=excluded.pgn,is_bot=excluded.is_bot,is_own_game=CASE WHEN ?17 THEN excluded.is_own_game ELSE games.is_own_game END,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",params![id,g.source,g.external_game_id,g.white_player,g.black_player,g.user_color,g.result,g.played_at,g.time_control,g.speed,g.rated,g.eco,g.opening_name,g.pgn,is_bot,if update_ownership { g.is_own_game } else { true },update_ownership]).map_err(err)?;
         if fresh {
             for m in g.moves {
                 tx.execute("INSERT INTO moves(id,game_id,ply,san,uci,fen_before,fen_after) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![format!("{}:{}",id,m.ply),id,m.ply,m.san,m.uci,m.fen_before,m.fen_after]).map_err(err)?;
@@ -240,7 +313,7 @@ fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Res
     Ok(count)
 }
 pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
-    let where_sql=" WHERE (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR (CASE WHEN result=user_color THEN 'win' WHEN result='draw' THEN 'draw' WHEN result IN ('white','black') THEN 'loss' ELSE 'unknown' END)=?2) AND (?3 IS NULL OR speed=?3) AND (?4 IS NULL OR review_status=?4) AND (?5 IS NULL OR eco LIKE '%'||?5||'%' OR opening_name LIKE '%'||?5||'%') AND (?6 IS NULL OR is_bot=?6)";
+    let where_sql=" WHERE (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR (CASE WHEN result=user_color THEN 'win' WHEN result='draw' THEN 'draw' WHEN result IN ('white','black') THEN 'loss' ELSE 'unknown' END)=?2) AND (?3 IS NULL OR speed=?3) AND (?4 IS NULL OR review_status=?4) AND (?5 IS NULL OR eco LIKE '%'||?5||'%' OR opening_name LIKE '%'||?5||'%') AND (?6 IS NULL OR is_bot=?6) AND (?7 IS NULL OR source=?7)";
     let total = db
         .query_row(
             &format!("SELECT COUNT(*) FROM games{where_sql}"),
@@ -250,14 +323,15 @@ pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
                 f.speed,
                 f.reviewed,
                 f.opening,
-                f.opponent_type.is_bot()
+                f.opponent_type.is_bot(),
+                f.source
             ],
             |r| r.get(0),
         )
         .map_err(err)?;
     let mut stmt = db
         .prepare(&format!(
-            "{GAME_SELECT}{where_sql} ORDER BY played_at DESC,id DESC LIMIT ?7 OFFSET ?8"
+            "{GAME_SELECT}{where_sql} ORDER BY played_at DESC,id DESC LIMIT ?8 OFFSET ?9"
         ))
         .map_err(err)?;
     let items = stmt
@@ -269,6 +343,7 @@ pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
                 f.reviewed,
                 f.opening,
                 f.opponent_type.is_bot(),
+                f.source,
                 f.limit.clamp(1, 100),
                 f.offset.max(0)
             ],
@@ -495,8 +570,41 @@ pub fn next_puzzle_title(
     Ok(format!("{prefix}{next}"))
 }
 
+fn puzzle_position_key(fen: &str) -> String {
+    // Counters do not change the puzzle; turn, castling and en-passant do.
+    fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ")
+}
+
 pub fn save_puzzle(db: &Connection, mut p: Puzzle) -> Result<String, String> {
     puzzle_category_label(&p.category)?;
+    // All UI creation paths share this function under the database mutex.
+    // Existing IDs are edits (the UPSERT does not change their initial FEN).
+    // Allow legacy duplicates to be edited without deleting user training data.
+    let exists = db
+        .query_row("SELECT 1 FROM puzzles WHERE id=?1", [&p.id], |_| Ok(()))
+        .optional()
+        .map_err(err)?
+        .is_some();
+    if !exists {
+        let key = puzzle_position_key(&p.fen);
+        let mut statement = db
+            .prepare("SELECT fen,title FROM puzzles ORDER BY created_at,id")
+            .map_err(err)?;
+        let existing = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(err)?;
+        for item in existing {
+            let (fen, title) = item.map_err(err)?;
+            if puzzle_position_key(&fen) == key {
+                return Err(format!(
+                    "该局面已存在题目「{}」，不能重复创建。请在题库中编辑已有题目。",
+                    title
+                ));
+            }
+        }
+    }
     // The command holds the database mutex while allocating and saving a name.
     // Blank titles request automatic naming; repeated saves retain their name.
     if p.title.trim().is_empty() {
@@ -658,9 +766,10 @@ pub fn opening_stats(
     from: Option<&str>,
     to: Option<&str>,
     opponent_type: OpponentType,
+    source: Option<&str>,
 ) -> Result<Vec<Value>, String> {
-    let mut s=db.prepare("SELECT COALESCE(eco,'—'),COALESCE(opening_name,'未知开局'),COUNT(*),SUM(CASE WHEN result=user_color THEN 1 ELSE 0 END),SUM(CASE WHEN result='draw' THEN 1 ELSE 0 END),SUM(CASE WHEN result IN ('white','black') AND result<>user_color THEN 1 ELSE 0 END) FROM games WHERE is_own_game=1 AND user_color IS NOT NULL AND result IN ('white','black','draw') AND (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR speed=?2) AND (?3 IS NULL OR played_at>=?3) AND (?4 IS NULL OR played_at<?4) AND (?5 IS NULL OR is_bot=?5) GROUP BY COALESCE(eco,'—'),COALESCE(opening_name,'未知开局') ORDER BY COUNT(*) DESC").map_err(err)?;
-    let result=s.query_map(params![color,speed,from,to,opponent_type.is_bot()],|r|{let count:i64=r.get(2)?;let wins:i64=r.get(3)?;let draws:i64=r.get(4)?;Ok(serde_json::json!({"eco":r.get::<_,String>(0)?,"opening":r.get::<_,String>(1)?,"total":count,"wins":wins,"draws":draws,"losses":r.get::<_,i64>(5)?,"winRate":wins as f64/count as f64,"scoreRate":(wins as f64+draws as f64*0.5)/count as f64}))}).map_err(err)?.collect::<rusqlite::Result<Vec<_>>>().map_err(err);
+    let mut s=db.prepare("SELECT COALESCE(eco,'—'),COALESCE(opening_name,'未知开局'),COUNT(*),SUM(CASE WHEN result=user_color THEN 1 ELSE 0 END),SUM(CASE WHEN result='draw' THEN 1 ELSE 0 END),SUM(CASE WHEN result IN ('white','black') AND result<>user_color THEN 1 ELSE 0 END) FROM games WHERE is_own_game=1 AND user_color IS NOT NULL AND result IN ('white','black','draw') AND (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR speed=?2) AND (?3 IS NULL OR played_at>=?3) AND (?4 IS NULL OR played_at<?4) AND (?5 IS NULL OR is_bot=?5) AND (?6 IS NULL OR source=?6) GROUP BY COALESCE(eco,'—'),COALESCE(opening_name,'未知开局') ORDER BY COUNT(*) DESC").map_err(err)?;
+    let result=s.query_map(params![color,speed,from,to,opponent_type.is_bot(),source],|r|{let count:i64=r.get(2)?;let wins:i64=r.get(3)?;let draws:i64=r.get(4)?;Ok(serde_json::json!({"eco":r.get::<_,String>(0)?,"opening":r.get::<_,String>(1)?,"total":count,"wins":wins,"draws":draws,"losses":r.get::<_,i64>(5)?,"winRate":wins as f64/count as f64,"scoreRate":(wins as f64+draws as f64*0.5)/count as f64}))}).map_err(err)?.collect::<rusqlite::Result<Vec<_>>>().map_err(err);
     result
 }
 #[cfg(test)]
@@ -668,6 +777,7 @@ mod tests {
     use super::*;
     fn filter(opponent_type: OpponentType) -> GameFilter {
         GameFilter {
+            source: None,
             opponent_type,
             color: None,
             result: None,
@@ -718,20 +828,20 @@ mod tests {
         wins_filter.color = Some("white".into());
         wins_filter.result = Some("win".into());
         wins_filter.speed = Some("rapid".into());
-        wins_filter.opening = Some("C20".into());
+        wins_filter.opening = Some("B00".into());
         wins_filter.reviewed = Some(false);
         assert_eq!(list_games(&db, wins_filter).unwrap().total, 1);
 
-        let humans = opening_stats(&db, None, None, None, None, OpponentType::Human).unwrap();
+        let humans = opening_stats(&db, None, None, None, None, OpponentType::Human, None).unwrap();
         assert_eq!(humans[0]["total"], 2);
         assert_eq!(humans[0]["wins"], 1);
         assert_eq!(humans[0]["losses"], 1);
         assert_eq!(humans[0]["winRate"], 0.5);
-        let bots = opening_stats(&db, None, None, None, None, OpponentType::Bot).unwrap();
+        let bots = opening_stats(&db, None, None, None, None, OpponentType::Bot, None).unwrap();
         assert_eq!(bots[0]["total"], 2);
         assert_eq!(bots[0]["draws"], 1);
         assert_eq!(bots[0]["scoreRate"], 0.75);
-        let all = opening_stats(&db, None, None, None, None, OpponentType::All).unwrap();
+        let all = opening_stats(&db, None, None, None, None, OpponentType::All, None).unwrap();
         assert_eq!(all[0]["total"], 4);
         assert_eq!(all[0]["scoreRate"], 0.625);
         let white_bots = opening_stats(
@@ -741,14 +851,21 @@ mod tests {
             Some("2026-10-01"),
             Some("2026-10-02"),
             OpponentType::Bot,
+            None,
         )
         .unwrap();
         assert_eq!(white_bots[0]["total"], 1);
-        assert!(
-            opening_stats(&db, None, None, Some("2026-10-02"), None, OpponentType::Bot)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(opening_stats(
+            &db,
+            None,
+            None,
+            Some("2026-10-02"),
+            None,
+            OpponentType::Bot,
+            None
+        )
+        .unwrap()
+        .is_empty());
         assert!(get_game(&db, "bot").unwrap().is_bot);
     }
 
@@ -776,7 +893,7 @@ mod tests {
             import_games(&mut db, vec![own, loss, other, bot]).unwrap(),
             4
         );
-        let all = opening_stats(&db, None, None, None, None, OpponentType::All).unwrap();
+        let all = opening_stats(&db, None, None, None, None, OpponentType::All, None).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0]["total"], 2);
         assert_eq!(all[0]["wins"], 1);
@@ -790,11 +907,12 @@ mod tests {
             Some("2026-10-01"),
             Some("2026-10-02"),
             OpponentType::Human,
+            None,
         )
         .unwrap();
         assert_eq!(filtered, all);
         assert!(
-            opening_stats(&db, None, None, None, None, OpponentType::Bot)
+            opening_stats(&db, None, None, None, None, OpponentType::Bot, None)
                 .unwrap()
                 .is_empty()
         );
@@ -832,7 +950,7 @@ mod tests {
             assert_eq!(import_games(&mut db, vec![other]).unwrap(), 0);
             assert!(!get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
             assert!(
-                opening_stats(&db, None, None, None, None, OpponentType::All)
+                opening_stats(&db, None, None, None, None, OpponentType::All, None)
                     .unwrap()
                     .is_empty()
             );
@@ -857,7 +975,8 @@ mod tests {
             assert_eq!(import_games(&mut db, vec![sample_game()]).unwrap(), 0);
             assert!(get_game(&db, "lichess:abcdefgh").unwrap().is_own_game);
             assert_eq!(
-                opening_stats(&db, None, None, None, None, OpponentType::All).unwrap()[0]["total"],
+                opening_stats(&db, None, None, None, None, OpponentType::All, None).unwrap()[0]
+                    ["total"],
                 1
             );
             // Older import payloads and synchronized new games default to own games.
@@ -867,6 +986,157 @@ mod tests {
         }
         let _ = std::fs::remove_file(path);
     }
+    fn chesscom_game() -> Game {
+        let mut game = sample_game();
+        game.id = "chesscom:live:123".into();
+        game.source = "chesscom".into();
+        game.external_game_id = Some("live:123".into());
+        game.pgn = "[Link \"https://www.chess.com/game/live/123\"]\n\n1. e4 1-0".into();
+        game
+    }
+    fn chesscom_checkpoint() -> ChessComCheckpoint {
+        ChessComCheckpoint {
+            completed_months: vec!["2026/10".into()],
+            pending: None,
+            read: 1,
+            added: 0,
+        }
+    }
+    #[test]
+    fn platform_filters_apply_to_count_pagination_and_own_game_statistics() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        import_games(&mut db, vec![sample_game(), chesscom_game()]).unwrap();
+        let mut other = chesscom_game();
+        other.id = "chesscom:live:456".into();
+        other.external_game_id = Some("live:456".into());
+        other.is_own_game = false;
+        import_games(&mut db, vec![other]).unwrap();
+        let mut query = filter(OpponentType::All);
+        query.source = Some("chesscom".into());
+        query.limit = 1;
+        query.offset = 1;
+        let page = list_games(&db, query).unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].source, "chesscom");
+        let stats = opening_stats(
+            &db,
+            None,
+            None,
+            None,
+            None,
+            OpponentType::All,
+            Some("chesscom"),
+        )
+        .unwrap();
+        assert_eq!(stats[0]["total"], 1);
+        assert_eq!(
+            opening_stats(&db, None, None, None, None, OpponentType::All, None).unwrap()[0]
+                ["total"],
+            2
+        );
+    }
+    #[test]
+    fn chesscom_adopts_legacy_import_without_losing_notes_branches_or_review_state() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let mut legacy = chesscom_game();
+        legacy.id = "local:legacy".into();
+        legacy.source = "local".into();
+        legacy.external_game_id = None;
+        legacy.is_own_game = false;
+        legacy.pgn = legacy.pgn.replace("/game/live/", "/live/game/");
+        import_games(&mut db, vec![legacy]).unwrap();
+        save_annotation(
+            &db,
+            "local:legacy",
+            Some("local:legacy:1"),
+            "keep move note",
+        )
+        .unwrap();
+        set_reviewed(&db, "local:legacy", true).unwrap();
+        db.execute("INSERT INTO review_variations(id,game_id,ply,san,uci,fen_before,fen_after,content) VALUES ('branch','local:legacy',1,'d4','d2d4','start','branch-fen','keep branch note')",[]).unwrap();
+        let saved = import_chesscom_batch(
+            &mut db,
+            "Trainer",
+            vec![chesscom_game()],
+            chesscom_checkpoint(),
+        )
+        .unwrap();
+        assert_eq!(saved.added, 0);
+        let game = get_game(&db, "local:legacy").unwrap();
+        assert_eq!(game.source, "chesscom");
+        assert!(game.review_status);
+        assert!(!game.is_own_game);
+        assert_eq!(game.moves[0].id, "local:legacy:1");
+        assert!(annotations(&db, "local:legacy")
+            .unwrap()
+            .iter()
+            .any(|(_, note)| note == "keep move note"));
+        assert_eq!(review_variations(&db, "local:legacy").unwrap().len(), 1);
+        assert_eq!(
+            db.query_row(
+                "SELECT content FROM review_variations WHERE id='branch'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "keep branch note"
+        );
+        import_chesscom_batch(
+            &mut db,
+            "Trainer",
+            vec![chesscom_game()],
+            chesscom_checkpoint(),
+        )
+        .unwrap();
+        assert_eq!(list_games(&db, filter(OpponentType::All)).unwrap().total, 1);
+    }
+    #[test]
+    fn chesscom_batch_and_checkpoint_roll_back_together_on_write_failure() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let mut broken = chesscom_game();
+        broken.id = "chesscom:live:999".into();
+        broken.external_game_id = Some("live:999".into());
+        broken.moves[0].ply = 0;
+        assert!(import_chesscom_batch(
+            &mut db,
+            "Trainer",
+            vec![chesscom_game(), broken],
+            chesscom_checkpoint()
+        )
+        .is_err());
+        assert_eq!(list_games(&db, filter(OpponentType::All)).unwrap().total, 0);
+        assert_eq!(get_setting(&db, "chesscom_sync_v1:trainer").unwrap(), None);
+        assert!(import_chesscom_batch(
+            &mut db,
+            "SomeoneElse",
+            vec![chesscom_game()],
+            chesscom_checkpoint()
+        )
+        .is_err());
+        let saved = import_chesscom_batch(
+            &mut db,
+            "Trainer",
+            vec![chesscom_game()],
+            chesscom_checkpoint(),
+        )
+        .unwrap();
+        assert_eq!(saved.added, 1);
+        assert_eq!(
+            serde_json::from_str::<ChessComCheckpoint>(
+                &get_setting(&db, "chesscom_sync_v1:trainer")
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap()
+            .added,
+            1
+        );
+    }
+
     fn sample_game() -> Game {
         Game {
             id: "lichess:abcdefgh".into(),
@@ -892,8 +1162,8 @@ mod tests {
                 ply: 1,
                 san: "e4".into(),
                 uci: "e2e4".into(),
-                fen_before: "start".into(),
-                fen_after: "after".into(),
+                fen_before: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".into(),
+                fen_after: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".into(),
             }],
         }
     }
@@ -967,6 +1237,7 @@ mod tests {
         let page = list_games(
             &db,
             GameFilter {
+                source: None,
                 opponent_type: OpponentType::Human,
                 color: Some("white".into()),
                 result: None,
@@ -1048,6 +1319,108 @@ mod tests {
         assert!(due_forecast(&db, &reversed).is_err());
     }
 
+    #[test]
+    fn duplicate_puzzle_positions_are_rejected_across_sources_categories_and_counters() {
+        for source in ["manual", "auto"] {
+            let db = Connection::open_in_memory().unwrap();
+            crate::db::migrations::migrate(&db).unwrap();
+            let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+            let mut original = named_puzzle("original", None, "已有题目");
+            original.fen = fen.into();
+            original.source_type = source.into();
+            save_puzzle(&db, original).unwrap();
+            db.execute("UPDATE review_schedules SET repetitions=5,interval_days=30 WHERE puzzle_id='original'", []).unwrap();
+            for (i, source) in ["manual", "auto"].iter().enumerate() {
+                let mut duplicate = named_puzzle(&format!("duplicate-{i}"), None, "new");
+                duplicate.fen =
+                    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR   w KQkq - 23 40".into();
+                duplicate.source_type = (*source).into();
+                duplicate.category = "tactics".into();
+                let error = save_puzzle(&db, duplicate).unwrap_err();
+                assert!(error.contains("已有题目") && error.contains("不能重复创建"));
+            }
+            assert_eq!(puzzles(&db, false, None).unwrap().len(), 1);
+            assert_eq!(schedule(&db, "original").unwrap().repetitions, 5);
+            let mut edit = named_puzzle("original", None, "更新标题");
+            edit.fen = fen.into();
+            edit.description = "更新说明".into();
+            save_puzzle(&db, edit).unwrap();
+            assert_eq!(
+                puzzles(&db, false, None).unwrap()[0].description,
+                "更新说明"
+            );
+            assert_eq!(schedule(&db, "original").unwrap().repetitions, 5);
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM review_schedules", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn puzzle_position_identity_retains_board_turn_castling_and_en_passant() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let fens = [
+            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 3",
+            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 3",
+            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQk - 0 3",
+            "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 3",
+        ];
+        for (index, fen) in fens.iter().enumerate() {
+            let mut p = named_puzzle(&format!("different-{index}"), None, "distinct");
+            p.fen = (*fen).into();
+            save_puzzle(&db, p).unwrap();
+        }
+        assert_eq!(puzzles(&db, false, None).unwrap().len(), 5);
+    }
+    #[test]
+    fn legacy_duplicates_remain_editable_but_cannot_gain_another_copy() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let mut first = named_puzzle("first", None, "first");
+        first.fen = "same-position".into();
+        save_puzzle(&db, first).unwrap();
+        db.execute("INSERT INTO puzzles(id,source_type,fen,side_to_move,title,expected_moves) VALUES ('legacy','manual','same-position','white','legacy','[]')",[]).unwrap();
+        let mut edit = named_puzzle("legacy", None, "Updated legacy");
+        edit.fen = "same-position".into();
+        save_puzzle(&db, edit).unwrap();
+        let mut third = named_puzzle("third", None, "third");
+        third.fen = "same-position".into();
+        assert!(save_puzzle(&db, third).is_err());
+        assert_eq!(puzzles(&db, false, None).unwrap().len(), 2);
+    }
+    #[test]
+    fn concurrent_puzzle_creations_under_the_command_mutex_only_save_one() {
+        use std::sync::{Arc, Barrier, Mutex};
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|index| {
+                let db = db.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let mut p = named_puzzle(&format!("parallel-{index}"), None, "parallel");
+                    p.fen = "shared-position".into();
+                    barrier.wait();
+                    save_puzzle(&db.lock().unwrap(), p).is_ok()
+                })
+            })
+            .collect();
+        assert_eq!(
+            handles
+                .into_iter()
+                .filter_map(|h| h.join().unwrap().then_some(()))
+                .count(),
+            1
+        );
+        assert_eq!(puzzles(&db.lock().unwrap(), false, None).unwrap().len(), 1);
+    }
+
     fn named_puzzle(id: &str, game_id: Option<&str>, title: &str) -> Puzzle {
         Puzzle {
             id: id.into(),
@@ -1055,7 +1428,7 @@ mod tests {
             source_type: "manual".into(),
             source_game_id: game_id.map(str::to_string),
             source_move_id: None,
-            fen: "start".into(),
+            fen: format!("fixture:{id}"),
             side_to_move: "white".into(),
             title: title.into(),
             description: "".into(),
@@ -1116,6 +1489,22 @@ mod tests {
         crate::db::migrations::migrate(&db).unwrap();
         let mut game = sample_game();
         game.opening_name = Some("Sicilian Defense: Najdorf Variation".into());
+        let fixtures: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/openings.json")).unwrap();
+        game.moves = fixtures[2]["moves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| Move {
+                id: format!("{}:{}", game.id, m["ply"]),
+                game_id: game.id.clone(),
+                ply: m["ply"].as_i64().unwrap(),
+                san: m["san"].as_str().unwrap().into(),
+                uci: m["uci"].as_str().unwrap().into(),
+                fen_before: m["fenBefore"].as_str().unwrap().into(),
+                fen_after: m["fenAfter"].as_str().unwrap().into(),
+            })
+            .collect();
         import_games(&mut db, vec![game]).unwrap();
         let id = Some("lichess:abcdefgh");
         assert_eq!(
@@ -1284,7 +1673,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         crate::db::migrations::migrate(&db).unwrap();
         import_games(&mut db, vec![sample_game()]).unwrap();
-        let stat = opening_stats(&db, None, None, None, None, OpponentType::Human).unwrap();
+        let stat = opening_stats(&db, None, None, None, None, OpponentType::Human, None).unwrap();
         assert_eq!(stat[0]["wins"], 1);
         assert_eq!(stat[0]["scoreRate"], 1.0);
         let p = Puzzle {

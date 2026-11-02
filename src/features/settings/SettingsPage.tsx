@@ -17,8 +17,41 @@ import { api } from "../../shared/api";
 import SoundSettings from "./SoundSettings";
 import UpdateSettings from "../updates/UpdateSettings";
 
+type AccountFeedbackState = {
+  action: "save" | "test" | "token";
+  status: "pending" | "success" | "error";
+  text: string;
+};
+
+function AccountFeedback({
+  feedback,
+}: {
+  feedback: AccountFeedbackState | null;
+}) {
+  return (
+    feedback && (
+      <Callout.Root
+        size="1"
+        color={
+          feedback.status === "error"
+            ? "red"
+            : feedback.status === "success"
+              ? "green"
+              : "gray"
+        }
+        role={feedback.status === "error" ? "alert" : "status"}
+        aria-live={feedback.status === "error" ? "assertive" : "polite"}
+        aria-atomic="true"
+      >
+        <Callout.Text>{feedback.text}</Callout.Text>
+      </Callout.Root>
+    )
+  );
+}
+
 export default function SettingsPage() {
   const [username, setUsername] = useState("");
+  const [chessComUsername, setChessComUsername] = useState("");
   const [token, setToken] = useState("");
   const [enginePath, setEnginePath] = useState("");
   const [preanalysisDepth, setPreanalysisDepth] = useState("14");
@@ -32,12 +65,20 @@ export default function SettingsPage() {
   });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lichessFeedback, setLichessFeedback] =
+    useState<AccountFeedbackState | null>(null);
+  const [chessFeedback, setChessFeedback] =
+    useState<AccountFeedbackState | null>(null);
 
   useEffect(() => {
     api
       .getSetting("lichess_username")
       .then((v) => setUsername(v ?? ""))
       .catch((e) => setMessage(String(e)));
+    api
+      .getSetting("chesscom_username")
+      .then((value) => setChessComUsername(value ?? ""))
+      .catch((error) => setMessage(String(error)));
     api
       .getSetting("engine_path")
       .then((v) => setEnginePath(v ?? "/opt/homebrew/bin/stockfish"))
@@ -73,34 +114,134 @@ export default function SettingsPage() {
   }, []);
 
   async function saveUsername() {
+    const value = username.trim();
     setBusy(true);
+    setLichessFeedback({
+      action: "save",
+      status: "pending",
+      text: "正在保存 Lichess 用户名…",
+    });
     try {
-      await api.setSetting("lichess_username", username.trim());
-      setMessage("用户名已保存");
-    } catch (e) {
-      setMessage(String(e));
+      await api.setSetting("lichess_username", value);
+      setLichessFeedback({
+        action: "save",
+        status: "success",
+        text: value ? "Lichess 用户名已保存" : "Lichess 账号已解除绑定",
+      });
+    } catch (error) {
+      setLichessFeedback({
+        action: "save",
+        status: "error",
+        text: `用户名保存失败：${error}`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveChessComUsername() {
+    const value = chessComUsername.trim();
+    if (value && !/^[a-zA-Z0-9_-]{1,100}$/.test(value)) {
+      setChessFeedback({
+        action: "save",
+        status: "error",
+        text: "请填写 Chess.com 用户名，不要填写主页地址",
+      });
+      return;
+    }
+    setBusy(true);
+    setChessFeedback({
+      action: "save",
+      status: "pending",
+      text: "正在保存 Chess.com 用户名…",
+    });
+    try {
+      await api.setSetting("chesscom_username", value);
+      setChessFeedback({
+        action: "save",
+        status: "success",
+        text: value ? "Chess.com 用户名已保存" : "Chess.com 账号已解除绑定",
+      });
+    } catch (error) {
+      setChessFeedback({
+        action: "save",
+        status: "error",
+        text: `用户名保存失败：${error}`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function testChessComConnection() {
+    setBusy(true);
+    setChessFeedback({
+      action: "test",
+      status: "pending",
+      text: "正在测试 Chess.com 连接…",
+    });
+    try {
+      await api.chessComTest(chessComUsername.trim());
+      setChessFeedback({
+        action: "test",
+        status: "success",
+        text: "Chess.com 连接成功",
+      });
+    } catch (error) {
+      setChessFeedback({
+        action: "test",
+        status: "error",
+        text: `Chess.com 连接失败：${error}`,
+      });
     } finally {
       setBusy(false);
     }
   }
   async function testConnection() {
     setBusy(true);
+    setLichessFeedback({
+      action: "test",
+      status: "pending",
+      text: "正在测试 Lichess 连接…",
+    });
     try {
       await api.lichessTest(username.trim());
-      setMessage("Lichess 连接成功");
-    } catch (e) {
-      setMessage(`连接失败：${e}`);
+      setLichessFeedback({
+        action: "test",
+        status: "success",
+        text: "Lichess 连接成功",
+      });
+    } catch (error) {
+      setLichessFeedback({
+        action: "test",
+        status: "error",
+        text: `Lichess 连接失败：${error}`,
+      });
     } finally {
       setBusy(false);
     }
   }
   async function saveToken() {
+    setBusy(true);
+    setLichessFeedback({
+      action: "token",
+      status: "pending",
+      text: "正在保存 Token…",
+    });
     try {
       await api.saveLichessToken(username.trim(), token);
       setToken("");
-      setMessage("Token 已保存");
-    } catch (e) {
-      setMessage(String(e));
+      setLichessFeedback({
+        action: "token",
+        status: "success",
+        text: "Token 已保存",
+      });
+    } catch (error) {
+      setLichessFeedback({
+        action: "token",
+        status: "error",
+        text: `Token 保存失败：${error}`,
+      });
+    } finally {
+      setBusy(false);
     }
   }
   async function saveEngine() {
@@ -168,10 +309,7 @@ export default function SettingsPage() {
     <>
       <Flex align="center" justify="between" mb="6">
         <Box>
-          <Text size="1" color="gray" weight="bold">
-            PREFERENCES
-          </Text>
-          <Heading as="h1" size="8" mt="1">
+          <Heading as="h1" size="7" mt="1">
             设置
           </Heading>
         </Box>
@@ -191,7 +329,11 @@ export default function SettingsPage() {
               用户名
               <TextField.Root
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                disabled={busy}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setLichessFeedback(null);
+                }}
                 placeholder="Lichess 用户名"
               />
             </Flex>
@@ -202,31 +344,85 @@ export default function SettingsPage() {
               <TextField.Root
                 type="password"
                 value={token}
-                onChange={(e) => setToken(e.target.value)}
+                disabled={busy}
+                onChange={(e) => {
+                  setToken(e.target.value);
+                  setLichessFeedback(null);
+                }}
                 placeholder="输入 Lichess Token"
               />
             </Flex>
           </Text>
+          <AccountFeedback feedback={lichessFeedback} />
           <Flex gap="2" wrap="wrap">
-            <Button
-              disabled={busy || !username.trim()}
-              onClick={() => void saveUsername()}
-            >
-              保存用户名
+            <Button disabled={busy} onClick={() => void saveUsername()}>
+              {lichessFeedback?.status === "pending" &&
+              lichessFeedback.action === "save"
+                ? "保存中…"
+                : "保存用户名"}
             </Button>
             <Button
               variant="soft"
               disabled={busy || !username.trim()}
               onClick={() => void testConnection()}
             >
-              测试连接
+              {lichessFeedback?.status === "pending" &&
+              lichessFeedback.action === "test"
+                ? "测试中…"
+                : "测试连接"}
             </Button>
             <Button
               variant="soft"
               disabled={busy || !username.trim() || !token}
               onClick={() => void saveToken()}
             >
-              保存 Token
+              {lichessFeedback?.status === "pending" &&
+              lichessFeedback.action === "token"
+                ? "保存中…"
+                : "保存 Token"}
+            </Button>
+          </Flex>
+        </Flex>
+      </Card>
+      <Card size="3" mb="4" className="max-w-155">
+        <Flex direction="column" gap="4">
+          <Heading size="4">Chess.com 账户</Heading>
+          <Text size="2" color="gray">
+            填写用户名即可同步已结束的标准国际象棋对局，无需密码。点击同步时，会同步所有已配置的平台；清空并保存可解除绑定。本应用与
+            Chess.com 无隶属关系。
+          </Text>
+          <Text as="label" size="2">
+            <Flex direction="column" gap="2">
+              用户名
+              <TextField.Root
+                aria-label="Chess.com 用户名"
+                placeholder="Chess.com 用户名"
+                value={chessComUsername}
+                disabled={busy}
+                onChange={(e) => {
+                  setChessComUsername(e.target.value);
+                  setChessFeedback(null);
+                }}
+              />
+            </Flex>
+          </Text>
+          <AccountFeedback feedback={chessFeedback} />
+          <Flex gap="2" wrap="wrap">
+            <Button disabled={busy} onClick={() => void saveChessComUsername()}>
+              {chessFeedback?.status === "pending" &&
+              chessFeedback.action === "save"
+                ? "保存中…"
+                : "保存用户名"}
+            </Button>
+            <Button
+              variant="soft"
+              disabled={busy || !chessComUsername.trim()}
+              onClick={() => void testChessComConnection()}
+            >
+              {chessFeedback?.status === "pending" &&
+              chessFeedback.action === "test"
+                ? "测试中…"
+                : "测试连接"}
             </Button>
           </Flex>
         </Flex>

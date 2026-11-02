@@ -1,5 +1,12 @@
 import { Chess } from "chess.js";
-import type { GameImport, LichessExportGame, Move } from "../../shared/types";
+import { classifyOpening } from "../../shared/chess/openings";
+import type {
+  ChessComGame,
+  GameImport,
+  GameSource,
+  LichessExportGame,
+  Move,
+} from "../../shared/types";
 
 export function splitPgn(text: string): string[] {
   const normalized = text.replace(/\r\n/g, "\n").trim();
@@ -19,14 +26,20 @@ function hash(s: string): string {
 }
 export function parsePgn(
   pgn: string,
-  source: "local" | "lichess",
+  source: GameSource,
   username?: string,
+  chessComUsername?: string,
 ): GameImport {
   const chess = new Chess();
   chess.loadPgn(pgn);
   const headers = chess.header();
   const verbose = chess.history({ verbose: true });
   const site = headers.Site ?? "";
+  const chessId = chessComGameId(headers.Link ?? site);
+  if (source === "local" && chessId) {
+    source = "chesscom";
+    username = chessComUsername;
+  }
   let externalGameId: string | null = null;
   if (source === "lichess") {
     const siteId = site.match(
@@ -41,10 +54,10 @@ export function parsePgn(
     }
     externalGameId = headerId || siteId || null;
   }
-  const id =
-    source === "lichess" && externalGameId
-      ? `lichess:${externalGameId}`
-      : `local:${hash(pgn.trim())}`;
+  if (source === "chesscom") externalGameId = chessId;
+  const id = externalGameId
+    ? `${source}:${externalGameId}`
+    : `local:${hash(pgn.trim())}`;
   const moves: Move[] = verbose.map((m, i) => ({
     id: `${id}:${i + 1}`,
     gameId: id,
@@ -102,8 +115,7 @@ export function parsePgn(
             : /^Casual\b/i.test(event)
               ? false
               : null,
-    eco: headers.ECO ?? null,
-    openingName: headers.Opening ?? null,
+    ...classifyOpening(moves),
     pgn,
     reviewStatus: false,
     isOwnGame: true,
@@ -112,26 +124,104 @@ export function parsePgn(
 }
 export function parsePgnCollection(
   text: string,
-  source: "local" | "lichess",
+  source: GameSource,
   username?: string,
+  chessComUsername?: string,
 ): GameImport[] {
-  return splitPgn(text).map((p) => parsePgn(p, source, username));
+  return splitPgn(text).map((p) =>
+    parsePgn(p, source, username, chessComUsername),
+  );
 }
 
 export function parseLichessBatch(
   batch: LichessExportGame[],
   username: string,
 ): GameImport[] {
-  return batch.map((record) => {
-    try {
-      const game = parsePgn(record.pgn, "lichess", username);
-      if (game.externalGameId !== record.id) {
-        throw new Error("棋谱 ID 不一致");
+  return batch
+    .filter((record) => isStandardPgn(record.pgn))
+    .map((record) => {
+      try {
+        const game = parsePgn(record.pgn, "lichess", username);
+        if (game.externalGameId !== record.id) {
+          throw new Error("棋谱 ID 不一致");
+        }
+        return game;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`对局 ${record.id} 解析失败：${message}`);
       }
-      return game;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`对局 ${record.id} 解析失败：${message}`);
-    }
-  });
+    });
+}
+
+export function isStandardPgn(pgn: string): boolean {
+  const variant = pgn
+    .split(/\n\s*\n/, 1)[0]
+    .match(/^\[Variant\s+"([^"]+)"\]\s*$/m)?.[1];
+  return !variant || variant.toLowerCase() === "standard";
+}
+export function chessComGameId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (
+      !["https:", "http:"].includes(parsed.protocol) ||
+      !["www.chess.com", "chess.com"].includes(parsed.hostname)
+    )
+      return null;
+    const match = parsed.pathname.match(
+      /^\/(?:game\/(live|daily)|(live|daily)\/game)\/([0-9]+)\/?$/,
+    );
+    return match ? `${match[1] ?? match[2]}:${match[3]}` : null;
+  } catch {
+    return null;
+  }
+}
+export function parseChessComBatch(
+  batch: ChessComGame[],
+  username: string,
+): GameImport[] {
+  return batch
+    .filter((record) => record.rules === "chess")
+    .flatMap((record) => {
+      const external = chessComGameId(record.url);
+      if (!external) throw new Error("Chess.com 对局地址无效");
+      try {
+        if (!isStandardPgn(record.pgn)) return [];
+        const game = parsePgn(record.pgn, "chesscom", username);
+        if (game.externalGameId && game.externalGameId !== external)
+          throw new Error("棋谱 ID 不一致");
+        if (
+          game.whitePlayer.toLowerCase() !==
+            record.white.username.toLowerCase() ||
+          game.blackPlayer.toLowerCase() !==
+            record.black.username.toLowerCase() ||
+          !game.userColor
+        )
+          throw new Error("棋谱账号不一致");
+        if (game.result === "unknown") return [];
+        const id = `chesscom:${external}`;
+        return [
+          {
+            ...game,
+            id,
+            externalGameId: external,
+            source: "chesscom",
+            speed:
+              record.time_class === "daily"
+                ? "correspondence"
+                : record.time_class,
+            timeControl: record.time_control,
+            rated: record.rated,
+            moves: game.moves.map((move) => ({
+              ...move,
+              id: `${id}:${move.ply}`,
+              gameId: id,
+            })),
+          },
+        ];
+      } catch (error) {
+        throw new Error(
+          `Chess.com 对局 ${external} 解析失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
 }

@@ -33,13 +33,7 @@ export default function VisualizationPage() {
   return (
     <Box className="mx-auto w-full max-w-240">
       <Box mb="6">
-        <Text
-          as="div"
-          className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink"
-        >
-          VISUALIZATION TRAINING
-        </Text>
-        <Heading as="h1" size="8" mt="2">
+        <Heading as="h1" size="7">
           可视化训练
         </Heading>
         <Text as="p" size="2" color="gray">

@@ -1,6 +1,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   Game,
+  ChessComGame,
+  ChessComSyncState,
+  GameSource,
   GameImport,
   ReviewVariation,
   GameFilter,
@@ -64,6 +67,7 @@ export const api = {
     from: string | null,
     to: string | null,
     opponentType: OpponentType = "human",
+    source: GameSource | null = null,
   ) =>
     invoke<OpeningStat[]>("opening_stats", {
       color,
@@ -71,6 +75,23 @@ export const api = {
       from,
       to,
       opponentType,
+      source,
+    }),
+  chessComTest: (username: string) =>
+    invoke<void>("chesscom_test", { username }),
+  chessComArchives: (username: string) =>
+    invoke<string[]>("chesscom_archives", { username }),
+  chessComMonth: (username: string, month: string) =>
+    invoke<ChessComGame[]>("chesscom_month", { username, month }),
+  importChessComBatch: (
+    username: string,
+    games: GameImport[],
+    checkpoint: ChessComSyncState,
+  ) =>
+    invoke<ChessComSyncState>("import_chesscom_batch", {
+      username,
+      games,
+      checkpoint,
     }),
   lichessTest: (username: string) => invoke<void>("lichess_test", { username }),
   lichessExportBatch: (username: string, since: number | null, until: number) =>
