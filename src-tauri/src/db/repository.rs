@@ -685,6 +685,44 @@ pub fn puzzle_list(
     })
 }
 
+#[derive(Debug, Serialize)]
+pub struct PuzzlePage {
+    pub items: Vec<PuzzleListItem>,
+    pub total: i64,
+}
+pub fn puzzle_page(
+    db: &Connection,
+    category: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<PuzzlePage, String> {
+    if let Some(category) = category {
+        puzzle_category_label(category)?;
+    }
+    let total = db
+        .query_row(
+            "SELECT COUNT(*) FROM puzzles WHERE (?1 IS NULL OR category=?1)",
+            [category],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let mut statement = db.prepare(&format!("{PUZZLE_SELECT} WHERE (?1 IS NULL OR category=?1) ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3")).map_err(err)?;
+    let items = statement
+        .query_map(
+            params![category, limit.clamp(1, 100), offset.max(0)],
+            |row| {
+                Ok(PuzzleListItem {
+                    puzzle: puzzle_from_row(row)?,
+                    due_at: row.get(13)?,
+                })
+            },
+        )
+        .map_err(err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(err)?;
+    Ok(PuzzlePage { items, total })
+}
+
 fn query_puzzles<T>(
     db: &Connection,
     due: bool,
@@ -1419,6 +1457,45 @@ mod tests {
             1
         );
         assert_eq!(puzzles(&db.lock().unwrap(), false, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn puzzle_pagination_counts_all_rows_filters_before_paging_and_has_stable_order() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        for index in 0..215 {
+            let mut p = named_puzzle(&format!("page-{index:03}"), None, "pagination");
+            if index % 2 == 1 {
+                p.category = "tactics".into();
+            }
+            save_puzzle(&db, p).unwrap();
+        }
+        let first = puzzle_page(&db, None, 10, 0).unwrap();
+        assert_eq!(first.total, 215);
+        assert_eq!(first.items.len(), 10);
+        let again = puzzle_page(&db, None, 10, 0).unwrap();
+        assert_eq!(
+            first.items.iter().map(|p| &p.puzzle.id).collect::<Vec<_>>(),
+            again.items.iter().map(|p| &p.puzzle.id).collect::<Vec<_>>()
+        );
+        let mut ids = std::collections::HashSet::new();
+        for offset in (0..215).step_by(10) {
+            for p in puzzle_page(&db, None, 10, offset).unwrap().items {
+                assert!(ids.insert(p.puzzle.id));
+            }
+        }
+        assert_eq!(ids.len(), 215);
+        assert_eq!(puzzle_page(&db, None, 10, 210).unwrap().items.len(), 5);
+        assert!(puzzle_page(&db, None, 10, 220).unwrap().items.is_empty());
+        let filtered = puzzle_page(&db, Some("tactics"), 10, 100).unwrap();
+        assert_eq!(filtered.total, 107);
+        assert_eq!(filtered.items.len(), 7);
+        assert!(filtered
+            .items
+            .iter()
+            .all(|p| p.puzzle.category == "tactics"));
+        assert!(puzzle_page(&db, Some("invalid"), 10, 0).is_err());
+        assert_eq!(puzzle_page(&db, None, 1000, -10).unwrap().items.len(), 100);
     }
 
     fn named_puzzle(id: &str, game_id: Option<&str>, title: &str) -> Puzzle {

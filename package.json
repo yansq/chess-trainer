@@ -13,6 +13,7 @@
     "release:prepare": "node scripts/prepare-release.mjs"
   },
   "dependencies": {
+    "@mliebelt/pgn-parser": "1.4.19",
     "@radix-ui/themes": "^3.3.0",
     "@tauri-apps/api": "^2.12.3",
     "@tauri-apps/plugin-process": "^2.4.0",

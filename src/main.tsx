@@ -1,21 +1,17 @@
-import { Theme } from "@radix-ui/themes";
+import { AppTheme, initialAppearance } from "./shared/ui/AppTheme";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./app/App";
 import "./style.css";
+const appearance = initialAppearance();
+document.documentElement.dataset.appearance = appearance;
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Theme
-      appearance="dark"
-      accentColor="gray"
-      grayColor="gray"
-      radius="medium"
-      className="h-full min-h-0"
-    >
+    <AppTheme initial={appearance}>
       <BrowserRouter>
         <App />
       </BrowserRouter>
-    </Theme>
+    </AppTheme>
   </React.StrictMode>,
 );

@@ -115,14 +115,14 @@ export function startGameAnalysis(
             },
           },
           completed,
-          status: `整局预分析 ${completed} / ${moves.length}`,
+          status: `${completed} / ${moves.length}`,
         });
       }
-      report({ status: `整局分析完成 ${moves.length} / ${moves.length}` });
+      report({ status: `${moves.length} / ${moves.length}` });
     } catch (error) {
       requestId = null;
       if (active)
-        report({ status: `整局分析失败：${String(error)}`, failed: true });
+        report({ status: `分析失败：${String(error)}`, failed: true });
     }
   })();
   return () => {

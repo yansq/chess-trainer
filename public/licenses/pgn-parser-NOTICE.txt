@@ -1,0 +1,4 @@
+Chess Trainer includes @mliebelt/pgn-parser 1.4.19 by the mliebelt/pgn-parser contributors.
+Source: https://github.com/mliebelt/pgn-parser
+License: Apache License 2.0 (see pgn-parser-LICENSE.txt).
+The parser is bundled without modifying its source.

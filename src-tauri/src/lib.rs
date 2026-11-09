@@ -20,6 +20,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::repertoire_list,
+            commands::repertoire_get,
+            commands::repertoire_save,
+            commands::repertoire_add_move,
+            commands::repertoire_delete,
             commands::import_games,
             commands::list_games,
             commands::get_game,
@@ -32,6 +37,7 @@ pub fn run() {
             commands::next_puzzle_title,
             commands::save_puzzle,
             commands::list_puzzles,
+            commands::puzzle_page,
             commands::get_puzzle,
             commands::delete_puzzle,
             commands::get_schedule,

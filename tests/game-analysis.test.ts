@@ -69,7 +69,7 @@ describe("整局顺序预分析", () => {
     expect(api.engineAnalyze.mock.calls.every((c) => c[5] === 1)).toBe(true);
     const last = states.at(-1)!;
     expect(last.completed).toBe(6);
-    expect(last.status).toBe("整局分析完成 6 / 6");
+    expect(last.status).toBe("6 / 6");
     expect(moves.map((m) => last.qualities[m.id].candidate?.category)).toEqual([
       "Inaccuracy",
       "Inaccuracy",

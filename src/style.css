@@ -32,6 +32,8 @@
   --color-board-selected: #b6a45f;
   --color-evaluation-white: #eeeee9;
   --color-evaluation-black: #273033;
+  --color-chart-upper: #323638;
+  --color-chart-lower: #273033;
 
   /* Shared application roles. */
   --color-sidebar-edge: #2b3031;
@@ -118,6 +120,84 @@
   --ease-switch: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+/* Theme roles are inherited by Radix portals and the chessboard workspace. */
+:root {
+  color-scheme: dark;
+}
+:root[data-appearance="light"] {
+  color-scheme: light;
+  --color-canvas: #f5f6f3;
+  --color-app: #252d29;
+  --color-sidebar: #edf0ea;
+  --color-panel: #ffffff;
+  --color-panel-edge: #d1d8cf;
+  --color-field: #ffffff;
+  --color-field-edge: #a7b3a8;
+  --color-control-edge: #b8c3b8;
+  --color-secondary: #e5ebe3;
+  --color-secondary-ink: #25352a;
+  --color-accent: #327648;
+  --color-accent-edge: #327648;
+  --color-accent-ink: #285e39;
+  --color-focus: #387b4e;
+  --color-muted: #5e6a61;
+  --color-engine-muted: #536159;
+  --color-selected: #dcebdc;
+  --color-selected-ink: #204a2c;
+  --color-chart-upper: #ffffff;
+  --color-chart-lower: #e5eae6;
+  --color-sidebar-edge: #cfd8cd;
+  --color-brand-ink: #2c5137;
+  --color-heading: #202a24;
+  --color-brand-muted: #5e6a61;
+  --color-empty: #536159;
+  --color-description: #536159;
+  --color-eyebrow-ink: #536159;
+  --color-notice-edge: #9fbaa5;
+  --color-notice: #e7f1e5;
+  --color-notice-ink: #285237;
+  --color-board-frame: #d4dbd2;
+  --color-coordinate: #526257;
+  --color-fen: #42554a;
+  --color-caption-ink: #536159;
+  --color-candidate-edge: #aac3ad;
+  --color-candidate-hover: #edf4ea;
+  --color-candidate-ink: #536159;
+  --color-help: #536159;
+  --color-move: #283d30;
+  --color-move-number: #536159;
+  --color-result-win: #dcefdc;
+  --color-result-win-ink: #235a32;
+  --color-result-loss: #f8dfdf;
+  --color-result-loss-ink: #943636;
+  --color-result-draw: #f0ebd8;
+  --color-result-draw-ink: #65541d;
+  --color-preview: #536159;
+  --color-training-description: #536159;
+  --color-answer: #e4f0e2;
+  --color-settings-description: #536159;
+  --color-switch-off: #79887c;
+  --color-field-hover: #6a876f;
+  --color-nav-selected-ink: #234b30;
+  --color-nav-selected: #d7e7d5;
+  --color-nav-ink: #4d5e52;
+  --color-nav-hover: #e0e7dd;
+  --color-table-head: #eef2eb;
+  --color-table-caption: #536159;
+  --color-table-edge: #d1d8cf;
+  --color-table-ink: #283d30;
+  --color-table-hover: #edf3e9;
+  --color-danger: #a72d2d;
+  --color-danger-ink: #8b2525;
+  --color-danger-edge: #be5555;
+  --color-danger-muted: #bd6c6c;
+  --background-color-danger: #fbe5e5;
+  --shadow-board: 0 0 0 1px #263b261a;
+  --shadow-focus: 0 0 0 2px #387b4e33;
+  --shadow-popover: 0 12px 32px #23332326;
+  --shadow-toggle: 0 1px 3px #23332326;
+}
+
 @layer base {
   :root {
     @apply bg-canvas font-sans text-app [font-synthesis:none];
@@ -130,6 +210,15 @@
 }
 
 /* Layout and third-party component contracts shared by the application. */
+@utility sidebar-motion {
+  transition-property: width, grid-template-columns, height, opacity, transform;
+  transition-duration: 220ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: 0ms;
+  }
+}
+
 @utility sidebar-wide {
   --sidebar-width: 224px;
 }
@@ -227,6 +316,11 @@
     --accent-10: #cbd9ce;
     --accent-contrast: #17221a;
   }
+  :root[data-appearance="light"] .radix-themes {
+    --accent-9: #315f40;
+    --accent-10: #254e33;
+    --accent-contrast: #ffffff;
+  }
   .radix-themes h1 {
     font-weight: 500;
     letter-spacing: -0.015em;
@@ -263,4 +357,29 @@
 
 .evaluation-chart-plot {
   height: 80px;
+}
+
+@utility grid-cols-repertoire {
+  grid-template-columns: minmax(180px, .9fr) minmax(240px, 1.3fr) minmax(210px, 1fr);
+}
+.repertoire-tab-switch { display: none; }
+@media (max-width: 1150px) {
+  .repertoire-tab-switch { display: flex; }
+  .repertoire-tab-hidden { display: none; }
+}
+@media (max-width: 900px) {
+  .grid-cols-repertoire { grid-template-columns: minmax(160px, .8fr) minmax(200px, 1fr) minmax(180px, .8fr); }
+}
+
+@utility w-repertoire-board {
+  width: min(100cqw, calc(100cqh - 64px));
+}
+
+@utility repertoire-line-panel {
+  flex: 0 1 auto;
+  max-height: 35%;
+  @media (max-width: 1150px) {
+    flex: 1 1 0%;
+    max-height: none;
+  }
 }

@@ -68,7 +68,7 @@ export default function MoveList({
         ref={tree.currentId === move.id ? selectedRef : undefined}
         className={
           compact
-            ? "m-0 box-border inline-flex h-auto w-28 min-w-0 gap-1 px-1 py-0 align-baseline font-normal"
+            ? "m-0 box-border inline-flex h-auto w-auto min-w-0 shrink-0 justify-start gap-1 px-1 py-0 align-baseline font-normal"
             : "m-0 box-border h-6 min-w-0 justify-start px-2 py-0 font-normal"
         }
         onClick={() => onSelect(move.id)}
@@ -82,7 +82,12 @@ export default function MoveList({
             {moveNumber(move)}
           </small>
         )}
-        <span className="min-w-0 flex-1 truncate text-left" title={move.san}>
+        <span
+          className={
+            compact ? "shrink-0 text-left" : "min-w-0 flex-1 truncate text-left"
+          }
+          title={move.san}
+        >
           {move.san}
         </span>
         {notes[move.id]?.trim() && (
@@ -99,21 +104,27 @@ export default function MoveList({
             />
           </span>
         )}
-        <span
-          className="inline-flex h-4 w-5 shrink-0 items-center justify-center"
-          data-quality-slot
-        >
-          {badge && (
-            <span
-              className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-eyebrow font-bold leading-none ${badge.color}`}
-              data-category={category}
-              title={`${category} · ${badge.label}`}
-              aria-label={badge.label}
-            >
-              {badge.symbol}
-            </span>
-          )}
-        </span>
+        {(!compact || badge) && (
+          <span
+            className={
+              compact
+                ? "inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                : "inline-flex h-4 w-5 shrink-0 items-center justify-center"
+            }
+            data-quality-slot
+          >
+            {badge && (
+              <span
+                className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-eyebrow font-bold leading-none ${badge.color}`}
+                data-category={category}
+                title={`${category} · ${badge.label}`}
+                aria-label={badge.label}
+              >
+                {badge.symbol}
+              </span>
+            )}
+          </span>
+        )}
       </Button>
     );
     if (move.sourceMoveId !== null) return moveButton;

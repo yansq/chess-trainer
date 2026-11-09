@@ -41,7 +41,7 @@ export default function EvaluationChart({
       aria-label="主线评分折线图"
     >
       <div className="flex items-center justify-between gap-2 px-3 py-1 text-caption text-engine-muted">
-        <span className="shrink-0">主线评分 · 白方视角</span>
+        <span className="shrink-0">主线评分</span>
         <span className="truncate tabular-nums" aria-live="off">
           {inspected
             ? `${inspected.label} · ${inspected.evaluation?.label ?? "待分析"}`
@@ -88,17 +88,8 @@ export default function EvaluationChart({
           onSelect(points[index].id);
         }}
       >
-        <rect
-          width="1000"
-          height="50"
-          className="fill-evaluation-white opacity-10"
-        />
-        <rect
-          y="50"
-          width="1000"
-          height="50"
-          className="fill-evaluation-black"
-        />
+        <rect width="1000" height="50" className="fill-chart-upper" />
+        <rect y="50" width="1000" height="50" className="fill-chart-lower" />
         <path
           d="M0,50 H1000"
           className="stroke-control-edge"

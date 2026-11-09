@@ -94,6 +94,15 @@ pub fn list_puzzles(
     repository::puzzle_list(&*db(&state)?, due, category.as_deref())
 }
 #[tauri::command]
+pub fn puzzle_page(
+    state: State<Database>,
+    category: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> Result<repository::PuzzlePage, String> {
+    repository::puzzle_page(&*db(&state)?, category.as_deref(), limit, offset)
+}
+#[tauri::command]
 pub fn get_due_forecast(
     state: State<Database>,
     boundaries: Vec<String>,
@@ -281,4 +290,40 @@ pub fn import_chesscom_batch(
     checkpoint: repository::ChessComCheckpoint,
 ) -> Result<repository::ChessComCheckpoint, String> {
     repository::import_chesscom_batch(&mut *db(&state)?, &username, games, checkpoint)
+}
+
+#[tauri::command]
+pub fn repertoire_list(
+    state: State<Database>,
+) -> Result<Vec<crate::db::repertoire::Summary>, String> {
+    crate::db::repertoire::list(&*db(&state)?)
+}
+#[tauri::command]
+pub fn repertoire_get(
+    state: State<Database>,
+    id: String,
+) -> Result<crate::db::repertoire::Repertoire, String> {
+    crate::db::repertoire::get(&*db(&state)?, &id)
+}
+#[tauri::command]
+pub fn repertoire_save(
+    state: State<Database>,
+    book: crate::db::repertoire::Repertoire,
+) -> Result<crate::db::repertoire::Repertoire, String> {
+    crate::db::repertoire::save(&*db(&state)?, book)
+}
+#[tauri::command]
+pub fn repertoire_delete(state: State<Database>, id: String, revision: i64) -> Result<(), String> {
+    crate::db::repertoire::delete(&*db(&state)?, &id, revision)
+}
+
+#[tauri::command]
+pub async fn repertoire_add_move(
+    state: State<'_, Database>,
+    id: String,
+    revision: i64,
+    node: crate::db::repertoire::Node,
+    notes: std::collections::HashMap<String, String>,
+) -> Result<i64, String> {
+    crate::db::repertoire::add_move(&*db(&state)?, &id, revision, node, notes)
 }

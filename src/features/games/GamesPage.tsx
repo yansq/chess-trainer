@@ -30,7 +30,7 @@ const initial: GameFilter = {
   speed: null,
   reviewed: null,
   opening: null,
-  limit: 25,
+  limit: 10,
   offset: 0,
 };
 function resultLabel(result: string, color: string | null) {
@@ -362,8 +362,13 @@ export default function GamesPage() {
                     {resultLabel(g.result, g.userColor)}
                   </Badge>
                 </Table.Cell>
-                <Table.Cell>
-                  {g.eco ?? "—"} · {g.openingName ?? "未知开局"}
+                <Table.Cell className="max-w-72 xl:max-w-96">
+                  <span
+                    className="block max-w-72 truncate xl:max-w-96"
+                    title={`${g.eco ?? "—"} · ${g.openingName ?? "未知开局"}`}
+                  >
+                    {g.eco ?? "—"} · {g.openingName ?? "未知开局"}
+                  </span>
                 </Table.Cell>
                 <Table.Cell>{g.speed ?? "—"}</Table.Cell>
                 <Table.Cell>{g.reviewStatus ? "已复盘" : "待复盘"}</Table.Cell>

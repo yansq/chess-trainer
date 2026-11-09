@@ -73,8 +73,15 @@ export function navigateReview(
   direction: "start" | "back" | "next" | "end",
 ): ReviewTree {
   if (direction === "start") return selectReviewMove(tree, null);
-  if (direction === "back")
-    return selectReviewMove(tree, currentReviewMove(tree)?.parentId ?? null);
+  if (direction === "back") {
+    const parentId = currentReviewMove(tree)?.parentId ?? null;
+    const previous = selectReviewMove(tree, parentId);
+    const preferred = { ...previous.preferred };
+    // Leaving a variation restores this fork's original continuation. Keep
+    // ancestor choices intact so nested variations return to their own line.
+    delete preferred[parentId ?? "root"];
+    return { ...previous, preferred };
+  }
   const move =
     direction === "end" ? reviewLineEnd(tree) : nextMove(tree, tree.currentId);
   return move ? selectReviewMove(tree, move.id) : tree;

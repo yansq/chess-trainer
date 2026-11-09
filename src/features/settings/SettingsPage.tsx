@@ -387,10 +387,6 @@ export default function SettingsPage() {
       <Card size="3" mb="4" className="max-w-155">
         <Flex direction="column" gap="4">
           <Heading size="4">Chess.com 账户</Heading>
-          <Text size="2" color="gray">
-            填写用户名即可同步已结束的标准国际象棋对局，无需密码。点击同步时，会同步所有已配置的平台；清空并保存可解除绑定。本应用与
-            Chess.com 无隶属关系。
-          </Text>
           <Text as="label" size="2">
             <Flex direction="column" gap="2">
               用户名

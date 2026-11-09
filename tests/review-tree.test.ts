@@ -17,6 +17,48 @@ function sample() {
 }
 
 describe("复盘试走分支", () => {
+  it("退出分支起点后向前进入主线，仍可主动选择原分支", () => {
+    const base = createReviewTree(parsePgn("1. e4 c5 *", "local").moves);
+    const fork = selectReviewMove(base, base.moves[0].id);
+    const branch = playReviewMove(fork, "e7", "e5")!;
+    const back = navigateReview(branch, "back");
+    expect(back.currentId).toBe(base.moves[0].id);
+    expect(navigateReview(back, "next").currentId).toBe(base.moves[1].id);
+    expect(navigateReview(back, "end").currentId).toBe(base.moves[1].id);
+    expect(selectReviewMove(back, branch.currentId).currentId).toBe(
+      branch.currentId,
+    );
+    expect(branch.preferred[base.moves[0].id]).toBe(branch.currentId);
+  });
+
+  it("分支内部普通回退可继续前进，嵌套分支退出后回到上一层原线路", () => {
+    const base = sample();
+    const fork = selectReviewMove(base, base.moves[2].id);
+    const branch = playReviewMove(fork, "g8", "f6")!;
+    const original = playReviewMove(branch, "f1", "b5")!;
+    const nested = playReviewMove(
+      navigateReview(original, "back"),
+      "f1",
+      "c4",
+    )!;
+    const deeper = playReviewMove(nested, "b8", "c6")!;
+    const inside = navigateReview(deeper, "back");
+    expect(navigateReview(inside, "next").currentId).toBe(deeper.currentId);
+    const parent = navigateReview(inside, "back");
+    expect(parent.currentId).toBe(branch.currentId);
+    expect(navigateReview(parent, "next").currentId).toBe(original.currentId);
+    const mainline = navigateReview(parent, "back");
+    expect(navigateReview(mainline, "next").currentId).toBe(base.moves[3].id);
+  });
+
+  it("退出初始局面上的变化后，前进恢复首步主线", () => {
+    const base = sample();
+    const branch = playReviewMove(base, "d2", "d4")!;
+    const start = navigateReview(branch, "back");
+    expect(start.currentId).toBeNull();
+    expect(navigateReview(start, "next").currentId).toBe(base.moves[0].id);
+  });
+
   it("用 Nf6 创建分支并保留原对局的 Nc6", () => {
     const original = sample();
     const before = selectReviewMove(original, original.moves[2].id);
@@ -60,7 +102,7 @@ describe("复盘试走分支", () => {
     expect(second.moves).toHaveLength(7);
     expect(
       navigateReview(navigateReview(second, "back"), "next").currentId,
-    ).toBe(second.currentId);
+    ).toBe(first.currentId);
     const chosen = selectReviewMove(second, first.currentId);
     expect(
       navigateReview(navigateReview(chosen, "start"), "end").currentId,

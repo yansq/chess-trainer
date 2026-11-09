@@ -6,6 +6,7 @@ import {
   Flex,
   Heading,
   Table,
+  TextField,
 } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -20,22 +21,45 @@ import { Select } from "../../shared/ui/select";
 export default function PuzzlesPage() {
   const [items, setItems] = useState<PuzzleListItem[]>([]);
   const [category, setCategory] = useState<PuzzleCategory | "">("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const pageSize = 10;
+  const pageCount = Math.ceil(total / pageSize);
+  function changePage(next: number) {
+    setLoading(true);
+    setPage(next);
+  }
   const [message, setMessage] = useState("");
   const nav = useNavigate();
   useEffect(() => {
     let active = true;
     api
-      .listPuzzles(false, category || null)
+      .puzzlePage(category || null, pageSize, (page - 1) * pageSize)
       .then((puzzles) => {
-        if (active) setItems(puzzles);
+        if (!active) return;
+        const lastPage = Math.max(1, Math.ceil(puzzles.total / pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setItems(puzzles.items);
+        setTotal(puzzles.total);
+        setMessage("");
+        setLoading(false);
       })
       .catch((e) => {
-        if (active) setMessage(String(e));
+        if (active) {
+          setMessage(String(e));
+          setItems([]);
+          setTotal(0);
+          setLoading(false);
+        }
       });
     return () => {
       active = false;
     };
-  }, [category]);
+  }, [category, page]);
 
   return (
     <>
@@ -80,13 +104,19 @@ export default function PuzzlesPage() {
               ?.label ?? "全部"}
             题目
             <span className="ml-2 text-xs font-normal text-engine-muted">
-              {items.length} 道
+              {total} 道
             </span>
           </Box>
           <Select<PuzzleCategory | "">
             label="筛选题目分类"
             value={category}
-            onValueChange={setCategory}
+            onValueChange={(value) => {
+              if (value !== category) {
+                setLoading(true);
+                setCategory(value);
+                setPage(1);
+              }
+            }}
             options={[{ value: "", label: "全部分类" }, ...PUZZLE_CATEGORIES]}
           />
         </Flex>
@@ -101,7 +131,7 @@ export default function PuzzlesPage() {
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {items.map((p) => (
+            {(loading ? [] : items).map((p) => (
               <Table.Row
                 key={p.id}
                 tabIndex={0}
@@ -147,13 +177,88 @@ export default function PuzzlesPage() {
             ))}
           </Table.Body>
         </Table.Root>
-        {items.length === 0 && (
+        {!loading && items.length === 0 && (
           <Box className="px-5 py-15 text-center text-empty">
             {category
               ? "该分类暂无题目。"
               : "题库为空。点击“新建题目”，或到复盘页面从局面创建题目。"}
           </Box>
         )}
+        {loading && (
+          <Box role="status" className="px-5 py-4 text-muted">
+            正在加载题目…
+          </Box>
+        )}
+        <Flex
+          align="center"
+          justify="end"
+          wrap="wrap"
+          className="gap-4 border-t border-panel-edge px-5 py-3 text-xs text-preview"
+        >
+          <Button
+            size="2"
+            variant="soft"
+            disabled={loading || page <= 1}
+            onClick={() => changePage(page - 1)}
+          >
+            上一页
+          </Button>
+          <span>
+            {total ? page : 0} / {pageCount}
+          </span>
+          <Button
+            size="2"
+            variant="soft"
+            disabled={loading || page >= pageCount}
+            onClick={() => changePage(page + 1)}
+          >
+            下一页
+          </Button>
+          <Flex asChild align="center" gap="2">
+            <form
+              aria-label="题库页码跳转"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const next = Number(
+                  new FormData(event.currentTarget).get("page"),
+                );
+                if (
+                  !loading &&
+                  Number.isSafeInteger(next) &&
+                  next >= 1 &&
+                  next <= pageCount &&
+                  next !== page
+                )
+                  changePage(next);
+              }}
+            >
+              <span>跳至</span>
+              <TextField.Root
+                key={`${page}:${pageCount}`}
+                aria-label="跳转页码"
+                name="page"
+                type="number"
+                size="2"
+                className="w-20"
+                min={1}
+                max={Math.max(1, pageCount)}
+                step={1}
+                required
+                defaultValue={total ? page : ""}
+                disabled={loading || !pageCount}
+              />
+              <span>页</span>
+              <Button
+                size="2"
+                variant="soft"
+                type="submit"
+                disabled={loading || !pageCount}
+              >
+                跳转
+              </Button>
+            </form>
+          </Flex>
+        </Flex>
       </Card>
     </>
   );
