@@ -62,6 +62,28 @@ pub fn migrate(db: &Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", 8)?;
         tx.commit()?;
     }
+    if version < 9 {
+        let tx = db.unchecked_transaction()?;
+        let has_stability: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('review_schedules') WHERE name='stability'",
+            [],
+            |r| r.get(0),
+        )?;
+        if has_stability == 0 {
+            tx.execute_batch(
+                "ALTER TABLE review_schedules ADD COLUMN stability REAL NOT NULL DEFAULT 0.0;
+                 ALTER TABLE review_schedules ADD COLUMN difficulty REAL NOT NULL DEFAULT 0.0;",
+            )?;
+        }
+        tx.execute_batch(
+            "UPDATE review_schedules SET
+               stability = CASE WHEN repetitions > 0 THEN MAX(0.1, interval_days) ELSE 0.0 END,
+               difficulty = CASE WHEN repetitions > 0 THEN MAX(1.0, MIN(10.0, 10.0 - (ease_factor - 1.3) / 1.2 * 9.0)) ELSE 0.0 END
+             WHERE stability = 0.0 AND repetitions > 0;",
+        )?;
+        tx.pragma_update(None, "user_version", 9)?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -173,7 +195,7 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            8
+            9
         );
     }
     #[test]
@@ -207,6 +229,29 @@ mod tests {
         );
     }
     #[test]
+    fn upgrades_v8_to_v9_migrates_fsrs_fields() {
+        let db = Connection::open_in_memory().unwrap();
+        migrate(&db).unwrap();
+        db.execute_batch(
+            "INSERT INTO puzzles(id,source_type,fen,side_to_move,title,expected_moves,solution_line) VALUES ('p-fsrs','manual','fen','white','测试FSRS','[\"e2e4\"]','[\"e2e4\"]');
+             INSERT INTO review_schedules(puzzle_id,due_at,repetitions,interval_days,ease_factor) VALUES ('p-fsrs','2026-10-20',2,6.0,2.5);
+             UPDATE review_schedules SET stability=0.0, difficulty=0.0 WHERE puzzle_id='p-fsrs';
+             PRAGMA user_version=8;",
+        )
+        .unwrap();
+        migrate(&db).unwrap();
+        let (stability, difficulty): (f64, f64) = db
+            .query_row(
+                "SELECT stability, difficulty FROM review_schedules WHERE puzzle_id='p-fsrs'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!((stability - 6.0).abs() < 1e-4);
+        assert!((difficulty - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn upgrades_existing_v1_and_can_repeat() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("migrations/0001_initial.sql"))
@@ -216,10 +261,10 @@ mod tests {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         let count: i64 = db
-            .query_row("SELECT COUNT(*) FROM pragma_table_info('review_schedules') WHERE name IN ('total_attempts','correct_count')", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('review_schedules') WHERE name IN ('total_attempts','correct_count','stability','difficulty')", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 4);
     }
 }

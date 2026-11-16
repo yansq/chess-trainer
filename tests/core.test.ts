@@ -50,7 +50,7 @@ describe("引擎变化的标准记号", () => {
     expect(uciLineToSan("invalid", ["e2e4"])).toEqual([]);
   });
 });
-describe("SM-2", () => {
+describe("FSRS 调度", () => {
   const now = new Date("2026-10-14T00:00:00.000Z");
   const base: Schedule = {
     puzzleId: "p",
@@ -63,29 +63,29 @@ describe("SM-2", () => {
     totalAttempts: 0,
     correctCount: 0,
   };
-  it("初次 Good 安排明天", () => {
+  it("初次 Good 安排 3 天间隔", () => {
     const n = scheduleReview(base, "Good", now);
     expect(n.repetitions).toBe(1);
-    expect(n.intervalDays).toBe(1);
-    expect(n.dueAt).toBe("2026-10-15T00:00:00.000Z");
+    expect(n.intervalDays).toBe(3);
+    expect(n.dueAt).toBe("2026-10-17T00:00:00.000Z");
   });
-  it("Again 重置连续次数", () => {
+  it("Again 重置连续次数并软着陆衰减", () => {
     const n = scheduleReview(
-      { ...base, repetitions: 5, intervalDays: 30 },
+      { ...base, repetitions: 5, intervalDays: 30, lastReviewedAt: "2026-09-14T00:00:00.000Z" },
       "Again",
       now,
     );
     expect(n.repetitions).toBe(0);
     expect(n.lapses).toBe(1);
-    expect(n.easeFactor).toBe(2.3);
+    expect(n.intervalDays).toBe(1);
   });
-  it("第二次 Good 进入六日间隔", () => {
+  it("再次复习成功保持间隔递增", () => {
     const n = scheduleReview(
-      { ...base, repetitions: 1, intervalDays: 1 },
+      { ...base, repetitions: 1, intervalDays: 3, lastReviewedAt: "2026-10-11T00:00:00.000Z" },
       "Good",
       now,
     );
-    expect(n.intervalDays).toBe(6);
+    expect(n.intervalDays).toBeGreaterThan(3);
   });
 });
 import { classifyMove } from "../src/features/analysis/blunders";

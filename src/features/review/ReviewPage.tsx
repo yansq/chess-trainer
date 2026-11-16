@@ -11,10 +11,14 @@ import { useEffect, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
 import { api } from "../../shared/api";
-import type { Puzzle } from "../../shared/types";
+import type { Puzzle, Schedule } from "../../shared/types";
 import { tryMove, uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound } from "../../shared/audio/move-sound";
-import { scheduleReview, type Rating } from "./scheduler";
+import {
+  scheduleReview,
+  previewNextIntervals,
+  type Rating,
+} from "./scheduler";
 import DueForecast from "./DueForecast";
 import SourceAnnotation from "./SourceAnnotation";
 import { isMultiMovePuzzle } from "../puzzles/answers";
@@ -27,9 +31,17 @@ import {
 function clockNow() {
   return Date.now();
 }
+function formatInterval(days: number | undefined): string {
+  if (days === undefined) return "";
+  if (days <= 1) return "1天";
+  if (days < 30) return `${days}天`;
+  if (days < 365) return `${Math.round(days / 30)}月`;
+  return `${(days / 365).toFixed(1)}年`;
+}
 export default function ReviewPage() {
   const [forecastRefresh, setForecastRefresh] = useState(0);
   const [queue, setQueue] = useState<Puzzle[]>([]);
+  const [currentSchedule, setCurrentSchedule] = useState<Schedule | null>(null);
   const [attempt, setAttempt] = useState<PuzzleAttempt | null>(null);
   const [selectedSquare, setSelectedSquare] = useState<{
     puzzleId: string;
@@ -53,6 +65,20 @@ export default function ReviewPage() {
       .catch((e) => setMessage(String(e)));
   }, []);
   const current = queue[0];
+  useEffect(() => {
+    let active = true;
+    if (current) {
+      api
+        .getSchedule(current.id)
+        .then((s) => {
+          if (active) setCurrentSchedule(s);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [current]);
   const waitingForReply = isWaitingForReply(attempt);
   const fen = attempt?.fen ?? current?.fen;
   const selected =
@@ -158,7 +184,7 @@ export default function ReviewPage() {
   async function rate(rating: Rating) {
     if (!current || !revealed) return;
     try {
-      const schedule = await api.getSchedule(current.id);
+      const schedule = currentSchedule ?? (await api.getSchedule(current.id));
       await api.recordReview({
         schedule: scheduleReview(schedule, rating),
         playedMove:
@@ -170,6 +196,7 @@ export default function ReviewPage() {
       });
       setForecastRefresh((value) => value + 1);
       setQueue((q) => q.slice(1));
+      setCurrentSchedule(null);
       setAttempt(null);
       setAnswerShown(false);
       setHadMistake(false);
@@ -343,17 +370,29 @@ export default function ReviewPage() {
               </>
             )}
             <Flex wrap="wrap" gap="2" className="mt-8">
-              {(["Again", "Hard", "Good", "Easy"] as const).map((r) => (
-                <Button
-                  size="2"
-                  variant={r === "Good" ? "solid" : "soft"}
-                  key={r}
-                  disabled={!revealed}
-                  onClick={() => void rate(r)}
-                >
-                  {r}
-                </Button>
-              ))}
+              {(["Again", "Hard", "Good", "Easy"] as const).map((r) => {
+                const intervals =
+                  revealed && currentSchedule
+                    ? previewNextIntervals(currentSchedule)
+                    : null;
+                const interval = intervals?.[r];
+                const intervalText =
+                  interval !== undefined ? ` · ${formatInterval(interval)}` : "";
+                const isRecommended =
+                  hadMistake || answerShown ? r === "Again" : r === "Good";
+                return (
+                  <Button
+                    size="2"
+                    variant={isRecommended ? "solid" : "soft"}
+                    key={r}
+                    disabled={!revealed}
+                    onClick={() => void rate(r)}
+                  >
+                    {r}
+                    {intervalText}
+                  </Button>
+                );
+              })}
             </Flex>
           </Card>
         </Grid>

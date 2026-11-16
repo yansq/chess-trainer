@@ -126,6 +126,8 @@ export interface Schedule {
   lastReviewedAt: string | null;
   totalAttempts: number;
   correctCount: number;
+  stability?: number;
+  difficulty?: number;
 }
 export interface ReviewInput {
   schedule: Schedule;

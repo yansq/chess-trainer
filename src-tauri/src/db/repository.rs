@@ -128,6 +128,10 @@ pub struct Schedule {
     pub last_reviewed_at: Option<String>,
     pub total_attempts: i64,
     pub correct_count: i64,
+    #[serde(default)]
+    pub stability: f64,
+    #[serde(default)]
+    pub difficulty: f64,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -778,11 +782,11 @@ pub fn due_forecast(db: &Connection, boundaries: &[String]) -> Result<Vec<i64>, 
     .map_err(err)
 }
 pub fn schedule(db: &Connection, id: &str) -> Result<Schedule, String> {
-    db.query_row("SELECT puzzle_id,due_at,interval_days,ease_factor,repetitions,lapses,last_reviewed_at,total_attempts,correct_count FROM review_schedules WHERE puzzle_id=?1",[id],|r|Ok(Schedule{puzzle_id:r.get(0)?,due_at:r.get(1)?,interval_days:r.get(2)?,ease_factor:r.get(3)?,repetitions:r.get(4)?,lapses:r.get(5)?,last_reviewed_at:r.get(6)?,total_attempts:r.get(7)?,correct_count:r.get(8)?})).map_err(err)
+    db.query_row("SELECT puzzle_id,due_at,interval_days,ease_factor,repetitions,lapses,last_reviewed_at,total_attempts,correct_count,stability,difficulty FROM review_schedules WHERE puzzle_id=?1",[id],|r|Ok(Schedule{puzzle_id:r.get(0)?,due_at:r.get(1)?,interval_days:r.get(2)?,ease_factor:r.get(3)?,repetitions:r.get(4)?,lapses:r.get(5)?,last_reviewed_at:r.get(6)?,total_attempts:r.get(7)?,correct_count:r.get(8)?,stability:r.get(9)?,difficulty:r.get(10)?})).map_err(err)
 }
 pub fn record_review(db: &mut Connection, input: ReviewInput) -> Result<(), String> {
     let tx = db.transaction().map_err(err)?;
-    tx.execute("UPDATE review_schedules SET due_at=?2,interval_days=?3,ease_factor=?4,repetitions=?5,lapses=?6,last_reviewed_at=?7,total_attempts=total_attempts+1,correct_count=correct_count+?8 WHERE puzzle_id=?1",params![input.schedule.puzzle_id,input.schedule.due_at,input.schedule.interval_days,input.schedule.ease_factor,input.schedule.repetitions,input.schedule.lapses,input.schedule.last_reviewed_at,input.is_correct]).map_err(err)?;
+    tx.execute("UPDATE review_schedules SET due_at=?2,interval_days=?3,ease_factor=?4,repetitions=?5,lapses=?6,last_reviewed_at=?7,total_attempts=total_attempts+1,correct_count=correct_count+?8,stability=?9,difficulty=?10 WHERE puzzle_id=?1",params![input.schedule.puzzle_id,input.schedule.due_at,input.schedule.interval_days,input.schedule.ease_factor,input.schedule.repetitions,input.schedule.lapses,input.schedule.last_reviewed_at,input.is_correct,input.schedule.stability,input.schedule.difficulty]).map_err(err)?;
     tx.execute("INSERT INTO review_logs(puzzle_id,reviewed_at,played_move,is_correct,rating,time_spent_ms) VALUES (?1,CURRENT_TIMESTAMP,?2,?3,?4,?5)",params![input.schedule.puzzle_id,input.played_move,input.is_correct,input.rating,input.time_spent_ms]).map_err(err)?;
     tx.commit().map_err(err)
 }

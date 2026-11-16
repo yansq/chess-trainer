@@ -1,38 +1,38 @@
 import type { Schedule } from "../../shared/types";
-export type Rating = "Again" | "Hard" | "Good" | "Easy";
+import {
+  fsrsSchedule,
+  type FSRSParameters,
+  type Rating,
+} from "./fsrs";
+
+export type { Rating } from "./fsrs";
+
+/**
+ * Schedules the next review for a puzzle using the FSRS (Free Spaced Repetition Scheduler) algorithm.
+ */
 export function scheduleReview(
   current: Schedule,
   rating: Rating,
   now = new Date(),
+  customParams: Partial<FSRSParameters> = {},
 ): Schedule {
-  const next = { ...current };
-  const success = rating !== "Again";
-  if (!success) {
-    next.repetitions = 0;
-    next.lapses++;
-    next.intervalDays = 1;
-    next.easeFactor = Math.max(1.3, next.easeFactor - 0.2);
-  } else {
-    next.repetitions++;
-    const factor = rating === "Hard" ? 0.8 : rating === "Easy" ? 1.3 : 1;
-    next.intervalDays =
-      current.repetitions === 0
-        ? 1
-        : current.repetitions === 1
-          ? 6
-          : Math.max(
-              1,
-              Math.round(current.intervalDays * current.easeFactor * factor),
-            );
-    next.easeFactor = Math.max(
-      1.3,
-      current.easeFactor +
-        (rating === "Hard" ? -0.15 : rating === "Easy" ? 0.15 : 0),
-    );
+  return fsrsSchedule(current, rating, now, customParams);
+}
+
+/**
+ * Previews next intervals for all four rating buttons (Again, Hard, Good, Easy)
+ * to provide clear visibility to the user during training.
+ */
+export function previewNextIntervals(
+  current: Schedule,
+  now = new Date(),
+  customParams: Partial<FSRSParameters> = {},
+): Record<Rating, number> {
+  const ratings: Rating[] = ["Again", "Hard", "Good", "Easy"];
+  const result = {} as Record<Rating, number>;
+  for (const r of ratings) {
+    const next = fsrsSchedule(current, r, now, customParams);
+    result[r] = next.intervalDays;
   }
-  next.lastReviewedAt = now.toISOString();
-  next.dueAt = new Date(
-    now.getTime() + next.intervalDays * 86400000,
-  ).toISOString();
-  return next;
+  return result;
 }
