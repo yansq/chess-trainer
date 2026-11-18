@@ -4,6 +4,7 @@ import {
   addMove,
   childrenOf,
   deleteBranch,
+  endOfLine,
   exportRepertoirePgn,
   importRepertoirePgn,
   newRepertoire,
@@ -207,5 +208,17 @@ describe("teaching PGN compatibility", () => {
     );
     expect(round.notes).toEqual(book.notes);
     expect(importRepertoirePgn(book, text).nodes).toEqual(book.nodes);
+  });
+  it("walks to the end of the first child line from any node", () => {
+    const book = imported();
+    const d5 = book.nodes.find((n) => n.san === "d5")!;
+    const nc6 = book.nodes.find((n) => n.san === "Nc6")!;
+    const e5 = book.nodes.find((n) => n.san === "e5")!;
+    expect(endOfLine(base(), null)).toBeNull();
+    expect(endOfLine(book, null)).toBe(d5.id);
+    expect(endOfLine(book, e5.id)).toBe(nc6.id);
+    expect(endOfLine(book, d5.id)).toBe(d5.id);
+    const promoted = promoteNode(book, e5.id);
+    expect(endOfLine(promoted, null)).toBe(nc6.id);
   });
 });

@@ -1,5 +1,5 @@
 import { Box, Button, Card, ContextMenu, Flex, Grid } from "@radix-ui/themes";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef } from "react";
 import { FileText } from "lucide-react";
 import { moveNumber, type ReviewMove, type ReviewTree } from "./review-tree";
 
@@ -17,7 +17,7 @@ type Props = {
   deleting?: boolean;
 };
 
-export default function MoveList({
+export default memo(function MoveList({
   tree,
   qualities = {},
   notes = {},
@@ -41,12 +41,17 @@ export default function MoveList({
       list.scrollTop += item.bottom - box.bottom;
   }, [tree.currentId]);
 
-  const children = new Map<string | null, ReviewMove[]>();
-  for (const move of tree.moves) {
-    const siblings = children.get(move.parentId) ?? [];
-    siblings.push(move);
-    children.set(move.parentId, siblings);
-  }
+  const { children, hasBranches } = useMemo(() => {
+    const map = new Map<string | null, ReviewMove[]>();
+    let branches = false;
+    for (const move of tree.moves) {
+      if (move.sourceMoveId === null) branches = true;
+      const siblings = map.get(move.parentId) ?? [];
+      siblings.push(move);
+      map.set(move.parentId, siblings);
+    }
+    return { children: map, hasBranches: branches };
+  }, [tree.moves]);
   function button(
     move: ReviewMove | undefined,
     compact = false,
@@ -190,7 +195,7 @@ export default function MoveList({
           {button(white)}
           {button(black)}
           {branches.length > 0 && (
-            <Box className="col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer">
+            <Box className="cv-row col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer">
               {branches.map((branch) => (
                 <Fragment key={branch.id}>{variation(branch)} </Fragment>
               ))}
@@ -203,7 +208,7 @@ export default function MoveList({
       if (last.sourceMoveId && move?.sourceMoveId === null) {
         rows.push(
           <Box
-            className="col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer"
+            className="cv-row col-span-full min-w-0 px-2 pb-0.75 text-xs leading-answer"
             key={move.id}
           >
             {variation(move)}
@@ -219,7 +224,6 @@ export default function MoveList({
     );
   }
   const first = children.get(null)?.[0];
-  const hasBranches = tree.moves.some((move) => move.sourceMoveId === null);
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
       <Flex
@@ -280,4 +284,4 @@ export default function MoveList({
       </Box>
     </Card>
   );
-}
+});

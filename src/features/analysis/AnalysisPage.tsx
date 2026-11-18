@@ -13,7 +13,14 @@ import {
   TextArea,
   TextField,
 } from "@radix-ui/themes";
-import { useCallback, useEffect, useState, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
@@ -27,7 +34,7 @@ import {
   Copy,
   RotateCcw,
 } from "lucide-react";
-import { api } from "../../shared/api";
+import { api, type EngineAnalysis } from "../../shared/api";
 import {
   startPositionAnalysis,
   type PositionAnalysis,
@@ -77,6 +84,8 @@ function playReviewSound(previous: ReviewTree, next: ReviewTree) {
   if (undo || !destination) void playSound("move");
   else playMoveSound(destination.san);
 }
+
+const EMPTY_QUALITIES: Record<string, MoveQuality> = {};
 
 function cancelBatch(batch: { generation: number; requestId: string | null }) {
   batch.generation++;
@@ -208,63 +217,103 @@ export default function AnalysisPage() {
       active = false;
     };
   }, [id]);
+  const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (
+      deletePending.current ||
+      e.defaultPrevented ||
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement
+    )
+      return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      setSelectedSquare(null);
+      setPromotion(null);
+      const next = navigateReview(
+        review,
+        e.key === "ArrowLeft" ? "back" : "next",
+      );
+      playReviewSound(review, next);
+      syncPuzzleAnswers(next);
+      setReview(next);
+    }
+  });
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (
-        deletePending.current ||
-        e.defaultPrevented ||
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      )
-        return;
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        setSelectedSquare(null);
-        setPromotion(null);
-        const next = navigateReview(
-          review,
-          e.key === "ArrowLeft" ? "back" : "next",
-        );
-        playReviewSound(review, next);
-        syncPuzzleAnswers(next);
-        setReview(next);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [review, syncPuzzleAnswers]);
-  const currentMove = currentReviewMove(review);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  const currentMove = useMemo(() => currentReviewMove(review), [review]);
   const ply = currentMove?.ply ?? 0;
   const fen = currentMove?.fenAfter ?? review.initialFen;
   const inBranch = !!currentMove && currentMove.sourceMoveId === null;
   const preanalysis = gameAnalysis?.gameId === game?.id ? gameAnalysis : null;
+  const preanalysisRef = useRef(preanalysis);
+  useEffect(() => {
+    preanalysisRef.current = preanalysis;
+  }, [preanalysis]);
   const currentPosition =
     positionAnalysis?.fen === fen ? positionAnalysis : null;
   const engine =
     currentPosition?.analysis ?? preanalysis?.positions[fen] ?? null;
+  const engineVariations = useMemo(
+    () =>
+      engine && engine.fen === fen
+        ? engine.variations.slice(0, 3).map((variation) => ({
+            ...variation,
+            sanLine: uciLineToSan(engine.fen, variation.pv),
+          }))
+        : null,
+    [engine, fen],
+  );
   const evaluation = positionEvaluation(fen, engine);
   const engineStatus = currentPosition?.status ?? "分析中…";
-  const lineLength = reviewLineEnd(review)?.ply ?? 0;
+  const lineLength = useMemo(
+    () => reviewLineEnd(review)?.ply ?? 0,
+    [review],
+  );
   const selected = selectedSquare?.fen === fen ? selectedSquare.square : null;
   const noteKey = currentMove?.id ?? "summary";
-  const qualities = engineEnabled
-    ? {
-        ...preanalysis?.qualities,
-        ...(moveQualities.gameId === game?.id ? moveQualities.values : {}),
-      }
-    : {};
+  const preQualities = preanalysis?.qualities;
+  const currentMoveQualities =
+    moveQualities.gameId === game?.id ? moveQualities.values : null;
+  const qualities = useMemo(() => {
+    if (!engineEnabled) return EMPTY_QUALITIES;
+    if (!preQualities && !currentMoveQualities) return EMPTY_QUALITIES;
+    return {
+      ...preQualities,
+      ...currentMoveQualities,
+    };
+  }, [engineEnabled, preQualities, currentMoveQualities]);
   const moveQuality = currentMove ? qualities[currentMove.id] : null;
   const quality = moveQuality?.fen === fen ? moveQuality : null;
   const badge = quality?.category ? qualityBadges[quality.category] : null;
   const markedSquare = badge ? currentMove?.uci.slice(2, 4) : null;
-  function changeReview(next: ReviewTree) {
-    if (deletePending.current) return;
-    playReviewSound(review, next);
-    syncPuzzleAnswers(next);
-    setSelectedSquare(null);
-    setPromotion(null);
-    setReview(next);
-  }
+  const changeReview = useCallback(
+    (next: ReviewTree) => {
+      if (deletePending.current) return;
+      playReviewSound(review, next);
+      syncPuzzleAnswers(next);
+      setSelectedSquare(null);
+      setPromotion(null);
+      setReview(next);
+    },
+    [review, syncPuzzleAnswers],
+  );
+  const reviewRef = useRef(review);
+  const changeReviewRef = useRef(changeReview);
+  useEffect(() => {
+    reviewRef.current = review;
+    changeReviewRef.current = changeReview;
+  }, [review, changeReview]);
+  const handleSelectMove = useCallback((moveId: string | null) => {
+    changeReviewRef.current(selectReviewMove(reviewRef.current, moveId));
+  }, []);
+  const handleMainline = useCallback(() => {
+    changeReviewRef.current(returnToMainline(reviewRef.current));
+  }, []);
+  const handleRetryAnalysis = useCallback(() => {
+    setAnalysisRetry((value) => value + 1);
+  }, []);
   function navigate(direction: "start" | "back" | "next" | "end") {
     changeReview(navigateReview(review, direction));
   }
@@ -311,6 +360,7 @@ export default function AnalysisPage() {
       throw error;
     }
   }
+  const deleteBranchRef = useRef<(moveId: string) => Promise<void>>(async () => {});
   async function deleteBranch(moveId: string) {
     if (!game || deletePending.current) return;
     const next = deleteReviewBranch(review, moveId);
@@ -353,6 +403,12 @@ export default function AnalysisPage() {
       setDeletingBranch(false);
     }
   }
+  useEffect(() => {
+    deleteBranchRef.current = deleteBranch;
+  });
+  const handleDeleteBranch = useCallback((moveId: string) => {
+    void deleteBranchRef.current(moveId);
+  }, []);
   function playMove(from: string, to: string, piece?: string): boolean {
     if (deletePending.current) return false;
     const next = playReviewMove(review, from, to, piece);
@@ -452,11 +508,24 @@ export default function AnalysisPage() {
         mistake: Number(mistake ?? 0.25),
         blunder: Number(blunder ?? 0.4),
       };
+      const localCache = new Map<string, EngineAnalysis>();
       const analyze = async (position: string) => {
+        const pre = preanalysisRef.current?.positions[position];
+        if (pre?.variations.length && pre.variations[0].depth >= depth)
+          return pre;
+        const cached = localCache.get(position);
+        if (cached) return cached;
         const requestId = crypto.randomUUID();
         batch.current.requestId = requestId;
         try {
-          return await api.engineAnalyze(path, position, depth, requestId);
+          const result = await api.engineAnalyze(
+            path,
+            position,
+            depth,
+            requestId,
+          );
+          localCache.set(position, result);
+          return result;
         } finally {
           if (batch.current.requestId === requestId)
             batch.current.requestId = null;
@@ -583,6 +652,30 @@ export default function AnalysisPage() {
       setMessage(String(e));
     }
   }
+  const handleSaveNote = useCallback(
+    (content: string) => {
+      const targetGameId = game?.id;
+      const targetMoveId = currentMove?.id ?? null;
+      const targetInBranch = inBranch;
+      const branchMoves = reviewRef.current.moves.filter(
+        (move) => move.sourceMoveId === null,
+      );
+      return enqueueReviewWrite(async () => {
+        if (!targetGameId) throw new Error("对局尚未加载");
+        if (targetInBranch)
+          await api.saveReviewVariations(targetGameId, branchMoves);
+        await api.saveAnnotation(targetGameId, targetMoveId, content);
+      });
+    },
+    [game?.id, currentMove?.id, inBranch],
+  );
+  const handleNoteSaved = useCallback(
+    (content: string) => {
+      setNotes((n) => ({ ...n, [noteKey]: content }));
+      setMessage("");
+    },
+    [noteKey],
+  );
   if (!id)
     return (
       <Grid
@@ -838,30 +931,14 @@ export default function AnalysisPage() {
             <NotePanel
               key={noteKey}
               disabled={deletingBranch}
-              onSave={(content) =>
-                enqueueReviewWrite(async () => {
-                  if (inBranch)
-                    await api.saveReviewVariations(
-                      game.id,
-                      review.moves.filter((move) => move.sourceMoveId === null),
-                    );
-                  await api.saveAnnotation(
-                    game.id,
-                    currentMove?.id ?? null,
-                    content,
-                  );
-                })
-              }
+              onSave={handleSaveNote}
               heading={
                 currentMove
                   ? `${moveNumber(currentMove)} ${currentMove.san} · ${inBranch ? "分支笔记" : "招法笔记"}`
                   : "对局总结"
               }
               content={notes[noteKey] ?? ""}
-              onSaved={(content) => {
-                setNotes((n) => ({ ...n, [noteKey]: content }));
-                setMessage("");
-              }}
+              onSaved={handleNoteSaved}
               onError={setMessage}
             />
           </Box>
@@ -927,13 +1004,13 @@ export default function AnalysisPage() {
                   p="2"
                   className="h-44 overflow-auto overscroll-contain text-body-sm"
                 >
-                  {engine && engine.fen === fen ? (
+                  {engineVariations ? (
                     <ol
                       className="m-0 w-full list-none divide-y divide-control-edge p-0"
                       aria-label="推荐招法"
                     >
-                      {engine.variations.slice(0, 3).map((variation) => {
-                        const sanLine = uciLineToSan(engine.fen, variation.pv);
+                      {engineVariations.map((variation) => {
+                        const { sanLine } = variation;
                         const uci = variation.pv[0];
                         return (
                           <li key={variation.rank}>
@@ -993,14 +1070,14 @@ export default function AnalysisPage() {
               initialFen={review.initialFen}
               analysis={preanalysis}
               currentId={review.currentId}
-              onSelect={(moveId) => changeReview(selectReviewMove(review, moveId))}
+              onSelect={handleSelectMove}
             />
             <MoveList
               tree={review}
               qualities={qualities}
               notes={notes}
               deleting={deletingBranch}
-              onDelete={(moveId) => void deleteBranch(moveId)}
+              onDelete={handleDeleteBranch}
               analysisStatus={
                 deletingBranch
                   ? "正在删除分支…"
@@ -1010,13 +1087,11 @@ export default function AnalysisPage() {
               }
               onRetry={
                 engineEnabled && preanalysis?.failed
-                  ? () => setAnalysisRetry((value) => value + 1)
+                  ? handleRetryAnalysis
                   : undefined
               }
-              onSelect={(moveId) =>
-                changeReview(selectReviewMove(review, moveId))
-              }
-              onMainline={() => changeReview(returnToMainline(review))}
+              onSelect={handleSelectMove}
+              onMainline={handleMainline}
             />
           </Flex>
           <Card

@@ -9,7 +9,7 @@ import {
   TextArea,
   TextField,
 } from "@radix-ui/themes";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chessboard } from "react-chessboard";
 import {
@@ -108,17 +108,20 @@ export default function PuzzleEditPage() {
       setBusy(false);
     }
   }
-  let preview = {
-    positions: [puzzle?.fen ?? ""],
-    sans: [] as string[],
-    alternatives: [] as string[],
-  };
-  let answerError = "";
-  try {
-    if (puzzle) preview = puzzlePreview(puzzle, answers, alternative);
-  } catch (error) {
-    answerError = String(error).replace(/^Error: /, "");
-  }
+  const { preview, answerError } = useMemo(() => {
+    let nextPreview = {
+      positions: [puzzle?.fen ?? ""],
+      sans: [] as string[],
+      alternatives: [] as string[],
+    };
+    let nextError = "";
+    try {
+      if (puzzle) nextPreview = puzzlePreview(puzzle, answers, alternative);
+    } catch (error) {
+      nextError = String(error).replace(/^Error: /, "");
+    }
+    return { preview: nextPreview, answerError: nextError };
+  }, [puzzle, answers, alternative]);
   const previewLength = preview.sans.length;
   useEffect(() => {
     if (!puzzle || busy || confirmDelete) return;

@@ -136,12 +136,6 @@ export default function App() {
           ) : (
             <PanelLeftClose size={18} className="shrink-0" />
           )}
-          <span
-            aria-hidden={sidebarCollapsed}
-            className={`sidebar-motion whitespace-nowrap ${sidebarCollapsed ? "-translate-x-2 opacity-0" : "translate-x-0 opacity-100"}`}
-          >
-            {sidebarAction}
-          </span>
         </button>
       </aside>
       <main

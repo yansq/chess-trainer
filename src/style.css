@@ -383,3 +383,13 @@
     max-height: none;
   }
 }
+
+@utility cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
+
+@utility cv-table-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
+}

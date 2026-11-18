@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { Move } from "../../shared/types";
 import type { GameAnalysis } from "./game-analysis";
 import { evaluationChartPath, evaluationChartPoints } from "./evaluation-chart";
 
-export default function EvaluationChart({
+export default memo(function EvaluationChart({
   moves,
   initialFen,
   analysis,
@@ -17,14 +17,24 @@ export default function EvaluationChart({
   onSelect: (id: string | null) => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const points = evaluationChartPoints(
-    moves,
-    initialFen,
-    analysis?.positions ?? {},
+  const positions = analysis?.positions;
+  const { points, known, path } = useMemo(() => {
+    const computedPoints = evaluationChartPoints(
+      moves,
+      initialFen,
+      positions ?? {},
+    );
+    return {
+      points: computedPoints,
+      known: computedPoints.filter((point) => point.y !== null),
+      path: evaluationChartPath(computedPoints),
+    };
+  }, [moves, initialFen, positions]);
+  const selected = useMemo(
+    () => points.findIndex((point) => point.id === currentId),
+    [points, currentId],
   );
-  const selected = points.findIndex((point) => point.id === currentId);
   const inspected = points[hovered ?? selected];
-  const known = points.filter((point) => point.y !== null);
   const selectAt = (clientX: number, element: SVGSVGElement) => {
     const rect = element.getBoundingClientRect();
     return Math.max(
@@ -96,7 +106,7 @@ export default function EvaluationChart({
           vectorEffect="non-scaling-stroke"
         />
         <path
-          d={evaluationChartPath(points)}
+          d={path}
           fill="none"
           className="stroke-accent"
           strokeWidth="2"
@@ -140,4 +150,4 @@ export default function EvaluationChart({
       </div>
     </section>
   );
-}
+});

@@ -51,6 +51,34 @@ export const childrenOf = (book: Repertoire, parentId: string | null) =>
   book.nodes
     .filter((n) => n.parentId === parentId)
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+export function endOfLine(
+  book: Repertoire,
+  startId: string | null,
+): string | null {
+  const byParent = new Map<string | null, RepertoireNode[]>();
+  for (const node of book.nodes) {
+    const list = byParent.get(node.parentId);
+    if (list) list.push(node);
+    else byParent.set(node.parentId, [node]);
+  }
+  let id = startId;
+  for (;;) {
+    const children = byParent.get(id);
+    if (!children?.length) return id;
+    let first = children[0];
+    for (let index = 1; index < children.length; index++) {
+      const candidate = children[index];
+      if (
+        candidate.order < first.order ||
+        (candidate.order === first.order &&
+          candidate.id.localeCompare(first.id) < 0)
+      ) {
+        first = candidate;
+      }
+    }
+    id = first.id;
+  }
+}
 export function addMove(
   book: Repertoire,
   parentId: string | null,

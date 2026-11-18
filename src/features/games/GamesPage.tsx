@@ -17,8 +17,7 @@ import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
 import { gameSourceLabel } from "../../shared/types";
 import { GameSourceSelect } from "../../shared/ui/GameSourceSelect";
-import type { GameFilter, GamePage } from "../../shared/types";
-import { parsePgnCollection } from "./pgn";
+import type { GameFilter, GameImport, GamePage } from "../../shared/types";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
 import { Select } from "../../shared/ui/select";
 import { useGameSync } from "./sync-store";
@@ -38,6 +37,35 @@ function resultLabel(result: string, color: string | null) {
   if (!color || result === "unknown") return "未知";
   return result === color ? "胜" : "负";
 }
+function parseLocalPgnInWorker(
+  text: string,
+  username?: string,
+  chessComUsername?: string,
+): Promise<GameImport[]> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./pgn.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    worker.onmessage = (
+      event: MessageEvent<{ games: GameImport[]; error?: string }>,
+    ) => {
+      worker.terminate();
+      if (event.data.error) reject(new Error(event.data.error));
+      else resolve(event.data.games);
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "棋谱解析线程异常"));
+    };
+    worker.postMessage({
+      source: "local",
+      text,
+      username,
+      chessComUsername,
+    });
+  });
+}
+
 export default function GamesPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
@@ -87,17 +115,18 @@ export default function GamesPage() {
     setBusy(true);
     setImportError("");
     try {
-      const text = typeof input === "string" ? input : await input.text();
-      if (!text.trim()) throw new Error("请粘贴 PGN 内容或选择文件");
-      const [username, chessComUsername] = await Promise.all([
+      const [text, username, chessComUsername] = await Promise.all([
+        typeof input === "string" ? input : input.text(),
         api.getSetting("lichess_username"),
         api.getSetting("chesscom_username"),
       ]);
-      const games = parsePgnCollection(
-        text,
-        "local",
-        username ?? undefined,
-        chessComUsername ?? undefined,
+      if (!text.trim()) throw new Error("请粘贴 PGN 内容或选择文件");
+      const games = (
+        await parseLocalPgnInWorker(
+          text,
+          username ?? undefined,
+          chessComUsername ?? undefined,
+        )
       ).map((game) => ({ ...game, isOwnGame }));
       if (!games.length) throw new Error("没有可导入的对局");
       const added = await api.importGames(games);
@@ -302,7 +331,6 @@ export default function GamesPage() {
           onValueChange={(speed) => change({ speed: speed || null })}
           options={[
             { value: "", label: "全部时限" },
-            { value: "bullet", label: "Bullet" },
             { value: "bullet", label: "Bullet" },
             { value: "blitz", label: "Blitz" },
             { value: "rapid", label: "Rapid" },

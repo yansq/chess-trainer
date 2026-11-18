@@ -71,46 +71,67 @@ export default function SettingsPage() {
     useState<AccountFeedbackState | null>(null);
 
   useEffect(() => {
+    let active = true;
     api
       .getSetting("lichess_username")
-      .then((v) => setUsername(v ?? ""))
-      .catch((e) => setMessage(String(e)));
+      .then((v) => {
+        if (active) setUsername(v ?? "");
+      })
+      .catch((e) => {
+        if (active) setMessage(String(e));
+      });
     api
       .getSetting("chesscom_username")
-      .then((value) => setChessComUsername(value ?? ""))
-      .catch((error) => setMessage(String(error)));
+      .then((value) => {
+        if (active) setChessComUsername(value ?? "");
+      })
+      .catch((error) => {
+        if (active) setMessage(String(error));
+      });
     api
       .getSetting("engine_path")
-      .then((v) => setEnginePath(v ?? "/opt/homebrew/bin/stockfish"))
+      .then((v) => {
+        if (active) setEnginePath(v ?? "/opt/homebrew/bin/stockfish");
+      })
       .catch(() => {});
     Promise.all([
       api.getSetting("engine_threads"),
       api.getSetting("engine_hash_mb"),
     ])
       .then(([threads, hashMb]) => {
+        if (!active) return;
         setThreads(threads ?? "4");
         setHashMb(hashMb ?? "256");
       })
-      .catch((e) => setMessage(`引擎参数加载失败：${String(e)}`));
+      .catch((e) => {
+        if (active) setMessage(`引擎参数加载失败：${String(e)}`);
+      });
     Promise.all([getEngineDepth("preanalysis"), getEngineDepth("position")])
       .then(([preanalysis, position]) => {
+        if (!active) return;
         setPreanalysisDepth(String(preanalysis));
         setPositionDepth(String(position));
       })
-      .catch((e) => setMessage(`分析深度加载失败：${String(e)}`));
+      .catch((e) => {
+        if (active) setMessage(`分析深度加载失败：${String(e)}`);
+      });
     Promise.all(
       ["loss_inaccuracy", "loss_mistake", "loss_blunder"].map((k) =>
         api.getSetting(k),
       ),
     )
-      .then(([a, b, c]) =>
+      .then(([a, b, c]) => {
+        if (!active) return;
         setThresholds({
           inaccuracy: Number(a ?? 0.12) * 100,
           mistake: Number(b ?? 0.25) * 100,
           blunder: Number(c ?? 0.4) * 100,
-        }),
-      )
+        });
+      })
       .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function saveUsername() {
@@ -271,17 +292,19 @@ export default function SettingsPage() {
       )
         throw new Error("Hash 须为 1～4096 MB 的整数");
       await api.engineValidate(enginePath.trim());
-      await api.setSetting("engine_path", enginePath.trim());
-      await api.setSetting(
-        "engine_preanalysis_depth",
-        String(normalizeEngineDepth(preanalysisDepth)),
-      );
-      await api.setSetting(
-        "engine_position_depth",
-        String(normalizeEngineDepth(positionDepth)),
-      );
-      await api.setSetting("engine_threads", String(Number(threads)));
-      await api.setSetting("engine_hash_mb", String(Number(hashMb)));
+      await Promise.all([
+        api.setSetting("engine_path", enginePath.trim()),
+        api.setSetting(
+          "engine_preanalysis_depth",
+          String(normalizeEngineDepth(preanalysisDepth)),
+        ),
+        api.setSetting(
+          "engine_position_depth",
+          String(normalizeEngineDepth(positionDepth)),
+        ),
+        api.setSetting("engine_threads", String(Number(threads))),
+        api.setSetting("engine_hash_mb", String(Number(hashMb))),
+      ]);
       setMessage("引擎配置已保存");
     } catch (e) {
       setMessage(String(e));

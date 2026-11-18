@@ -13,7 +13,7 @@ import {
   TextArea,
   TextField,
 } from "@radix-ui/themes";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chess, DEFAULT_POSITION, type Square } from "chess.js";
 import { Chessboard, defaultPieces } from "react-chessboard";
@@ -95,19 +95,40 @@ export default function PuzzleCreatePage() {
     solutionLine: [],
     errorCategory: null,
   };
-  let preview = {
-    positions: [fen],
-    sans: [] as string[],
-    alternatives: [] as string[],
-  };
-  let answerError = "";
-  if (!setupError && answers.trim()) {
-    try {
-      preview = puzzlePreview(puzzle, answers, 0);
-    } catch (error) {
-      answerError = String(error).replace(/^Error: /, "");
+  const { preview, answerError } = useMemo(() => {
+    let nextPreview = {
+      positions: [fen],
+      sans: [] as string[],
+      alternatives: [] as string[],
+    };
+    let nextError = "";
+    if (!setupError && answers.trim()) {
+      try {
+        nextPreview = puzzlePreview(
+          {
+            id: "",
+            category: "opening",
+            sourceType: "manual",
+            sourceGameId: null,
+            sourceMoveId: null,
+            fen,
+            sideToMove: fen.split(" ")[1] === "w" ? "white" : "black",
+            title: "",
+            description: "",
+            originalMove: null,
+            expectedMoves: [],
+            solutionLine: [],
+            errorCategory: null,
+          },
+          answers,
+          0,
+        );
+      } catch (error) {
+        nextError = String(error).replace(/^Error: /, "");
+      }
     }
-  }
+    return { preview: nextPreview, answerError: nextError };
+  }, [fen, setupError, answers]);
   const currentStep = Math.min(step, preview.sans.length);
   const currentFen = preview.positions[currentStep];
   const previewLength = preview.sans.length;

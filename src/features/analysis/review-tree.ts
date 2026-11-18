@@ -40,30 +40,47 @@ export function selectReviewMove(
   id: string | null,
 ): ReviewTree {
   if (id === null) return { ...tree, currentId: null };
-  let move = tree.moves.find((node) => node.id === id);
+  const byId = new Map(tree.moves.map((node) => [node.id, node]));
+  let move = byId.get(id);
   if (!move) return tree;
   const preferred = { ...tree.preferred };
   while (move) {
     preferred[move.parentId ?? "root"] = move.id;
-    move = tree.moves.find((node) => node.id === move?.parentId);
+    move = move.parentId ? byId.get(move.parentId) : undefined;
   }
   return { ...tree, currentId: id, preferred };
 }
 
 function nextMove(tree: ReviewTree, id: string | null) {
-  const children = tree.moves.filter((move) => move.parentId === id);
-  return (
-    children.find((move) => move.id === tree.preferred[id ?? "root"]) ??
-    children[0]
-  );
+  const preferredId = tree.preferred[id ?? "root"];
+  let first: ReviewMove | undefined;
+  for (const move of tree.moves) {
+    if (move.parentId !== id) continue;
+    if (!first) first = move;
+    if (move.id === preferredId) return move;
+  }
+  return first;
 }
 
 export function reviewLineEnd(tree: ReviewTree): ReviewMove | null {
-  let move = currentReviewMove(tree);
-  let next = nextMove(tree, tree.currentId);
+  const children = new Map<string | null, ReviewMove[]>();
+  let move: ReviewMove | null = null;
+  for (const node of tree.moves) {
+    if (node.id === tree.currentId) move = node;
+    const list = children.get(node.parentId);
+    if (list) list.push(node);
+    else children.set(node.parentId, [node]);
+  }
+  const pick = (id: string | null) => {
+    const list = children.get(id);
+    if (!list?.length) return undefined;
+    const preferredId = tree.preferred[id ?? "root"];
+    return list.find((node) => node.id === preferredId) ?? list[0];
+  };
+  let next = pick(tree.currentId);
   while (next) {
     move = next;
-    next = nextMove(tree, move.id);
+    next = pick(move.id);
   }
   return move;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ContextMenu, IconButton } from "@radix-ui/themes";
 import { ChevronDown, ChevronRight, FileText, CircleSlash } from "lucide-react";
 import {
@@ -25,7 +25,7 @@ interface Props {
   promote: (id: string) => void;
   remove: (id: string) => void;
 }
-export default function RepertoireTree({
+export default memo(function RepertoireTree({
   book,
   currentId,
   busy,
@@ -52,10 +52,14 @@ export default function RepertoireTree({
     return map;
   }, [book.nodes]);
   const selected = useRef<HTMLButtonElement>(null);
-  const path = new Set(
-    pathTo(book, currentId)
-      .slice(0, -1)
-      .map((n) => n.id),
+  const path = useMemo(
+    () =>
+      new Set(
+        pathTo(book, currentId)
+          .slice(0, -1)
+          .map((n) => n.id),
+      ),
+    [book, currentId],
   );
   useEffect(() => {
     selected.current?.scrollIntoView({ block: "nearest" });
@@ -75,7 +79,7 @@ export default function RepertoireTree({
           (node.id === currentId && children.length > 1));
       const disabled = inactive || node.disabled;
       return (
-        <div key={node.id}>
+        <div key={node.id} className="cv-row">
           <div className="flex min-w-0 items-center gap-1 py-0.5">
             {children.length > 0 ? (
               <IconButton
@@ -180,4 +184,4 @@ export default function RepertoireTree({
       )}
     </div>
   );
-}
+});

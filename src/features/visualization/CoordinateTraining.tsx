@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { memo, useCallback, useEffect, useReducer } from "react";
 import { Box, Button, Card, Flex, Grid, Heading, Text } from "@radix-ui/themes";
 import {
   coordinateSession,
@@ -6,12 +6,51 @@ import {
   initialCoordinateSession,
 } from "./coordinates";
 
+const CoordinateBoard = memo(function CoordinateBoard({
+  running,
+  wrong,
+  onAnswer,
+}: {
+  running: boolean;
+  wrong: string | null;
+  onAnswer: (square: string) => void;
+}) {
+  return (
+    <div
+      className="grid w-full max-w-112 grid-cols-8 overflow-hidden rounded-nav border-4 border-board-frame"
+      role="group"
+      aria-label="无坐标棋盘，白方视角，左下角为 a1"
+    >
+      {coordinateSquares.map((square, index) => (
+        <button
+          type="button"
+          key={square}
+          aria-label={square}
+          disabled={!running}
+          onClick={() => onAnswer(square)}
+          className={`aspect-square min-w-0 cursor-pointer focus-visible:z-10 focus-visible:outline-4 focus-visible:-outline-offset-4 focus-visible:outline-focus disabled:cursor-default ${((index % 8) + Math.floor(index / 8)) % 2 ? "bg-board-dark" : "bg-board-light"} ${wrong === square ? "ring-4 ring-danger ring-inset" : ""}`}
+        />
+      ))}
+    </div>
+  );
+});
+
 export default function CoordinateTraining() {
   const [session, dispatch] = useReducer(
     coordinateSession,
     initialCoordinateSession,
   );
   const running = session.status === "running";
+  const handleAnswer = useCallback(
+    (square: string) =>
+      dispatch({
+        type: "answer",
+        square,
+        now: performance.now(),
+        random: Math.random(),
+      }),
+    [],
+  );
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(
@@ -30,29 +69,11 @@ export default function CoordinateTraining() {
         秒结束后统计成绩。
       </Text>
       <Grid gap="5" className="grid-cols-2 max-[760px]:grid-cols-1">
-        <div
-          className="grid w-full max-w-112 grid-cols-8 overflow-hidden rounded-nav border-4 border-board-frame"
-          role="group"
-          aria-label="无坐标棋盘，白方视角，左下角为 a1"
-        >
-          {coordinateSquares.map((square, index) => (
-            <button
-              type="button"
-              key={square}
-              aria-label={square}
-              disabled={!running}
-              onClick={() =>
-                dispatch({
-                  type: "answer",
-                  square,
-                  now: performance.now(),
-                  random: Math.random(),
-                })
-              }
-              className={`aspect-square min-w-0 cursor-pointer focus-visible:z-10 focus-visible:outline-4 focus-visible:-outline-offset-4 focus-visible:outline-focus disabled:cursor-default ${((index % 8) + Math.floor(index / 8)) % 2 ? "bg-board-dark" : "bg-board-light"} ${session.wrong === square ? "ring-4 ring-danger ring-inset" : ""}`}
-            />
-          ))}
-        </div>
+        <CoordinateBoard
+          running={running}
+          wrong={session.wrong}
+          onAnswer={handleAnswer}
+        />
         <Flex direction="column" align="start" gap="4">
           <Text size="2" color="gray">
             白方视角 · 棋盘不显示坐标

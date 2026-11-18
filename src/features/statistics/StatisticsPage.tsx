@@ -311,7 +311,10 @@ export default function StatisticsPage() {
           </Table.Header>
           <Table.Body>
             {rows.map((s) => (
-              <Table.Row key={isFamily ? s.opening : `${s.eco}-${s.opening}`}>
+              <Table.Row
+                key={isFamily ? s.opening : `${s.eco}-${s.opening}`}
+                className="cv-table-row"
+              >
                 {!isFamily && <Table.Cell>{s.eco}</Table.Cell>}
                 <Table.Cell>{s.opening}</Table.Cell>
                 <Table.Cell justify="end">{s.total}</Table.Cell>

@@ -7,12 +7,13 @@ import {
   Flex,
   Grid,
 } from "@radix-ui/themes";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Chessboard } from "react-chessboard";
 import { Chess, type Square } from "chess.js";
 import { api } from "../../shared/api";
 import type { Puzzle, Schedule } from "../../shared/types";
-import { tryMove, uciLineToSan } from "../../shared/chess/moves";
+import { uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound } from "../../shared/audio/move-sound";
 import {
   scheduleReview,
@@ -28,6 +29,7 @@ import {
   schedulePuzzleReply,
   type PuzzleAttempt,
 } from "./attempt";
+import { buildSolutionSteps, calculateNextStep } from "./solution";
 function clockNow() {
   return Date.now();
 }
@@ -108,14 +110,92 @@ export default function ReviewPage() {
       setMessage,
     );
   }, [current, attempt, waitingForReply, revealed]);
-  let solutionFen = current?.fen;
-  for (let i = 0; i < solutionStep; i++) {
-    const u = current?.solutionLine[i];
-    if (!u || !solutionFen) break;
-    solutionFen =
-      tryMove(solutionFen, u.slice(0, 2), u.slice(2, 4), u[4] ?? "q")?.fen ??
-      solutionFen;
-  }
+  const intervals = useMemo(
+    () =>
+      revealed && currentSchedule
+        ? previewNextIntervals(currentSchedule)
+        : null,
+    [revealed, currentSchedule],
+  );
+  const solutionSteps = useMemo(() => {
+    return buildSolutionSteps(current?.fen, current?.solutionLine);
+  }, [current]);
+
+  const stepSolution = useCallback(
+    (delta: number) => {
+      if (!current || solutionSteps.length === 0) return;
+      const maxSteps = solutionSteps.length;
+      setSolutionStep((prev) => {
+        const next = calculateNextStep(prev, delta, maxSteps);
+        if (next === prev) return prev;
+        if (delta > 0 && next > 0) {
+          const stepInfo = solutionSteps[next - 1];
+          playMoveSound(stepInfo?.san ?? "");
+        } else {
+          playMoveSound("");
+        }
+        return next;
+      });
+    },
+    [current, solutionSteps],
+  );
+
+  const advanceSolution = useCallback(() => {
+    if (!current || solutionSteps.length === 0) return;
+    const maxSteps = solutionSteps.length;
+    setSolutionStep((prev) => {
+      const next = (prev + 1) % (maxSteps + 1);
+      if (next > 0) {
+        const stepInfo = solutionSteps[next - 1];
+        playMoveSound(stepInfo?.san ?? "");
+      } else {
+        playMoveSound("");
+      }
+      return next;
+    });
+  }, [current, solutionSteps]);
+
+  useEffect(() => {
+    if (!current || !revealed || solutionSteps.length === 0) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="combobox"], [role="listbox"], [role="option"], [role="dialog"], [role="alertdialog"]',
+        )
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      stepSolution(event.key === "ArrowLeft" ? -1 : 1);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [current, revealed, solutionSteps.length, stepSolution]);
+
+  const isReviewingSolution = answerShown || solutionStep > 0;
+  const boardPosition = isReviewingSolution
+    ? solutionStep === 0
+      ? (current?.fen ?? fen)
+      : (solutionSteps[solutionStep - 1]?.fen ?? current?.fen ?? fen)
+    : fen;
+
   function move(from: string, to: string, piece?: string) {
     if (!current || revealed || waitingForReply) return false;
     try {
@@ -165,21 +245,6 @@ export default function ReviewPage() {
     setPromotion(null);
     setSolutionStep(0);
     setMessage("已显示答案，请查看正确走法后选择复习评级。");
-  }
-  function advanceSolution() {
-    if (!current) return;
-    const next = (solutionStep + 1) % (current.solutionLine.length + 1);
-    if (next > 0 && solutionFen) {
-      const uci = current.solutionLine[solutionStep];
-      const played = tryMove(
-        solutionFen,
-        uci.slice(0, 2),
-        uci.slice(2, 4),
-        uci[4] ?? "q",
-      );
-      if (played) playMoveSound(played.san);
-    }
-    setSolutionStep(next);
   }
   async function rate(rating: Rating) {
     if (!current || !revealed) return;
@@ -244,7 +309,7 @@ export default function ReviewPage() {
           <Box className="w-full overflow-hidden rounded-lg border-8 border-board-frame shadow-board">
             <Chessboard
               options={{
-                position: solutionStep > 0 ? solutionFen : fen,
+                position: boardPosition,
                 boardOrientation: current.sideToMove,
                 allowDragging: !revealed && !promotion && !waitingForReply,
                 dragActivationDistance: 5,
@@ -352,17 +417,49 @@ export default function ReviewPage() {
                       .map((uci) => uciLineToSan(current.fen, [uci])[0] ?? uci)
                       .join("、")}
                   </Box>
-                  {current.solutionLine.length > 0 && (
+                  {solutionSteps.length > 0 && (
                     <>
                       <Box>
                         {multiMove ? "完整答案" : "参考变化"}：
-                        {uciLineToSan(current.fen, current.solutionLine).join(
-                          " ",
-                        )}
+                        {solutionSteps.map((step) => step.san).join(" ")}
                       </Box>
-                      <Button size="1" variant="soft" onClick={advanceSolution}>
-                        播放变化 {solutionStep}/{current.solutionLine.length}
-                      </Button>
+                      <Flex align="center" gap="2" mt="2" wrap="wrap">
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={() => stepSolution(-1)}
+                          disabled={solutionStep <= 0}
+                          aria-label="上一步"
+                          aria-keyshortcuts="ArrowLeft"
+                          title="上一步 (← 方向键)"
+                        >
+                          <ChevronLeft size={14} />
+                        </Button>
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={advanceSolution}
+                          title="循环播放下一步 (或使用左右方向键)"
+                        >
+                          播放变化 {solutionStep}/{solutionSteps.length}
+                        </Button>
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={() => stepSolution(1)}
+                          disabled={solutionStep >= solutionSteps.length}
+                          aria-label="下一步"
+                          aria-keyshortcuts="ArrowRight"
+                          title="下一步 (→ 方向键)"
+                        >
+                          <ChevronRight size={14} />
+                        </Button>
+                        {solutionSteps.length > 1 && (
+                          <span className="text-xs text-engine-muted select-none">
+                            支持按 ← / → 方向键导航
+                          </span>
+                        )}
+                      </Flex>
                     </>
                   )}
                 </Box>
@@ -371,10 +468,6 @@ export default function ReviewPage() {
             )}
             <Flex wrap="wrap" gap="2" className="mt-8">
               {(["Again", "Hard", "Good", "Easy"] as const).map((r) => {
-                const intervals =
-                  revealed && currentSchedule
-                    ? previewNextIntervals(currentSchedule)
-                    : null;
                 const interval = intervals?.[r];
                 const intervalText =
                   interval !== undefined ? ` · ${formatInterval(interval)}` : "";

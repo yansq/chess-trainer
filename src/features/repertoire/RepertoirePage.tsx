@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -31,6 +38,7 @@ import {
   addMove,
   childrenOf,
   deleteBranch,
+  endOfLine,
   exportRepertoirePgn,
   moveLabel,
   newRepertoire,
@@ -68,7 +76,11 @@ export default function RepertoirePage() {
   >(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [rightTab, setRightTab] = useState<"line" | "note">("line");
-  const current = book?.nodes.find((n) => n.id === currentId);
+  const path = useMemo(
+    () => (book ? pathTo(book, currentId) : []),
+    [book, currentId],
+  );
+  const current = path.at(-1);
   const lastMoveTarget =
     current && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(current.uci)
       ? current.uci.slice(2, 4)
@@ -80,13 +92,17 @@ export default function RepertoirePage() {
     (k) =>
       drafts[k] !== book?.notes[k] && !(drafts[k] === "" && !book?.notes[k]),
   );
-  const path = book ? pathTo(book, currentId) : [];
-  const opening = classifyOpening(
-    path.length
-      ? path
-      : book
-        ? [{ fenBefore: book.initialFen, fenAfter: book.initialFen }]
-        : [],
+  const bookInitialFen = book?.initialFen;
+  const opening = useMemo(
+    () =>
+      classifyOpening(
+        path.length
+          ? path
+          : bookInitialFen
+            ? [{ fenBefore: bookInitialFen, fenAfter: bookInitialFen }]
+            : [],
+      ),
+    [path, bookInitialFen],
   );
   useEffect(() => {
     let active = true;
@@ -124,30 +140,33 @@ export default function RepertoirePage() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  useEffect(() => {
-    if (!dirty || !book) return;
-    const leave = (event: MouseEvent) => {
-      if (
-        event.button !== 0 ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey ||
-        event.altKey ||
-        !(event.target instanceof Element)
-      )
-        return;
-      const link = event.target.closest("a[href]");
-      const href = link?.getAttribute("href");
-      if (!href?.startsWith("/") || href === window.location.pathname) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void save(book).then((saved) => {
-        if (saved) navigateTo(href);
-      });
-    };
-    document.addEventListener("click", leave, true);
-    return () => document.removeEventListener("click", leave, true);
+  const hasBook = book !== null;
+  const onLeaveClick = useEffectEvent((event: MouseEvent) => {
+    if (
+      !dirty ||
+      !book ||
+      event.button !== 0 ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.altKey ||
+      !(event.target instanceof Element)
+    )
+      return;
+    const link = event.target.closest("a[href]");
+    const href = link?.getAttribute("href");
+    if (!href?.startsWith("/") || href === window.location.pathname) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void save(book).then((saved) => {
+      if (saved) navigateTo(href);
+    });
   });
+  useEffect(() => {
+    if (!dirty || !hasBook) return;
+    document.addEventListener("click", onLeaveClick, true);
+    return () => document.removeEventListener("click", onLeaveClick, true);
+  }, [dirty, hasBook]);
   function withDrafts(next: Repertoire) {
     return { ...next, notes: { ...next.notes, ...drafts } };
   }
@@ -221,39 +240,38 @@ export default function RepertoirePage() {
     if (direction === "back") id = current?.parentId ?? null;
     if (direction === "next")
       id = childrenOf(book, currentId)[0]?.id ?? currentId;
-    if (direction === "end")
-      while (childrenOf(book, id).length) id = childrenOf(book, id)[0].id;
+    if (direction === "end") id = endOfLine(book, currentId);
     void go(id);
   }
-  useEffect(() => {
-    function keyboard(event: KeyboardEvent) {
-      if (
-        event.defaultPrevented ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        event.shiftKey ||
-        event.isComposing ||
-        dialog ||
-        confirmation ||
-        busy
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.shiftKey ||
+      event.isComposing ||
+      dialog ||
+      confirmation ||
+      busy
+    )
+      return;
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest(
+        'input,textarea,select,[contenteditable="true"],[role="dialog"],[role="menu"],[role="combobox"]',
       )
-        return;
-      if (
-        event.target instanceof HTMLElement &&
-        event.target.closest(
-          'input,textarea,select,[contenteditable="true"],[role="dialog"],[role="menu"],[role="combobox"]',
-        )
-      )
-        return;
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        navigate(event.key === "ArrowLeft" ? "back" : "next");
-      }
+    )
+      return;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      navigate(event.key === "ArrowLeft" ? "back" : "next");
     }
-    window.addEventListener("keydown", keyboard);
-    return () => window.removeEventListener("keydown", keyboard);
   });
+  useEffect(() => {
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   function play(from: string, to: string, promote = "q") {
     if (!book || working.current) return false;
     const chess = new Chess(fen);
@@ -456,6 +474,44 @@ export default function RepertoirePage() {
       setMessage(`导出失败：${String(error)}`);
     }
   }
+  const treeActionsRef = useRef<{
+    go: (id: string | null) => void;
+    promote: (id: string) => void;
+    toggle: (node: Repertoire["nodes"][number]) => void;
+  }>({
+    go: () => {},
+    promote: () => {},
+    toggle: () => {},
+  });
+  useEffect(() => {
+    treeActionsRef.current = {
+      go: (id) => void go(id),
+      promote: (id) => {
+        if (book) void save(promoteNode(book, id));
+      },
+      toggle: (node) => {
+        if (book)
+          void save({
+            ...book,
+            nodes: book.nodes.map((n) =>
+              n.id === node.id ? { ...n, disabled: !n.disabled } : n,
+            ),
+          });
+      },
+    };
+  });
+  const handleTreeSelect = useCallback((id: string | null) => {
+    treeActionsRef.current.go(id);
+  }, []);
+  const handleTreePromote = useCallback((id: string) => {
+    treeActionsRef.current.promote(id);
+  }, []);
+  const handleTreeToggle = useCallback((node: Repertoire["nodes"][number]) => {
+    treeActionsRef.current.toggle(node);
+  }, []);
+  const handleTreeRemove = useCallback((nodeId: string) => {
+    setConfirmation({ nodeId });
+  }, []);
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <Flex
@@ -558,17 +614,10 @@ export default function RepertoirePage() {
               book={book}
               currentId={currentId}
               busy={busy}
-              select={(id) => void go(id)}
-              promote={(id) => void save(promoteNode(book, id))}
-              toggle={(node) =>
-                void save({
-                  ...book,
-                  nodes: book.nodes.map((n) =>
-                    n.id === node.id ? { ...n, disabled: !n.disabled } : n,
-                  ),
-                })
-              }
-              remove={(nodeId) => setConfirmation({ nodeId })}
+              select={handleTreeSelect}
+              promote={handleTreePromote}
+              toggle={handleTreeToggle}
+              remove={handleTreeRemove}
             />
           </Card>
           <section className="min-h-0 min-w-0 container-size">

@@ -1,5 +1,5 @@
 import { Box, Button, Card, Flex, TextArea } from "@radix-ui/themes";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 type Props = {
   onSave: (content: string) => Promise<void>;
@@ -9,7 +9,7 @@ type Props = {
   onError: (message: string) => void;
   disabled?: boolean;
 };
-export default function NotePanel({
+export default memo(function NotePanel({
   onSave,
   heading,
   content,
@@ -79,4 +79,4 @@ export default function NotePanel({
       </Flex>
     </Card>
   );
-}
+});
