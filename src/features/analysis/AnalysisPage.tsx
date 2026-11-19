@@ -30,8 +30,6 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Check,
-  Copy,
   RotateCcw,
 } from "lucide-react";
 import { api, type EngineAnalysis } from "../../shared/api";
@@ -46,6 +44,7 @@ import {
   type PuzzleCategory,
 } from "../../shared/types";
 import { Select } from "../../shared/ui/select";
+import { CopyFenButton } from "../../shared/ui/CopyFenButton";
 import { uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound, playSound } from "../../shared/audio/move-sound";
 import { classifyMove, type Candidate } from "./blunders";
@@ -121,7 +120,6 @@ export default function AnalysisPage() {
     to: string;
   } | null>(null);
   const [flipped, setFlipped] = useState(false);
-  const [copiedFen, setCopiedFen] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [branchSaveError, setBranchSaveError] = useState<{
@@ -185,11 +183,6 @@ export default function AnalysisPage() {
   }
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [batchProgress, setBatchProgress] = useState("");
-  useEffect(() => {
-    if (!copiedFen) return;
-    const timer = window.setTimeout(() => setCopiedFen(null), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copiedFen]);
   useEffect(() => {
     if (!id) return;
     let active = true;
@@ -436,14 +429,6 @@ export default function AnalysisPage() {
       return;
     }
     if (selected) playMove(selected, square);
-  }
-  async function copyFen() {
-    try {
-      await navigator.clipboard.writeText(fen);
-      setCopiedFen(fen);
-    } catch {
-      setMessage("复制 FEN 失败，请重试");
-    }
   }
   async function completeOrNextGame() {
     if (!game || reviewBusy) return;
@@ -914,16 +899,7 @@ export default function AnalysisPage() {
                 >
                   <RotateCcw />
                 </IconButton>
-                <IconButton
-                  size="1"
-                  variant="ghost"
-                  className="[&_svg]:size-4"
-                  onClick={() => void copyFen()}
-                  aria-label="复制当前局面 FEN"
-                  title={copiedFen === fen ? "已复制 FEN" : "复制 FEN"}
-                >
-                  {copiedFen === fen ? <Check /> : <Copy />}
-                </IconButton>
+                <CopyFenButton fen={fen} onError={setMessage} />
               </Flex>
             </Box>
           </Box>

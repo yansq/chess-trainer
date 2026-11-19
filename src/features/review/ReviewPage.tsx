@@ -15,6 +15,7 @@ import { api } from "../../shared/api";
 import type { Puzzle, Schedule } from "../../shared/types";
 import { uciLineToSan } from "../../shared/chess/moves";
 import { playMoveSound } from "../../shared/audio/move-sound";
+import { CopyFenButton } from "../../shared/ui/CopyFenButton";
 import {
   scheduleReview,
   previewNextIntervals,
@@ -29,7 +30,12 @@ import {
   schedulePuzzleReply,
   type PuzzleAttempt,
 } from "./attempt";
-import { buildSolutionSteps, calculateNextStep } from "./solution";
+import {
+  buildSolutionSteps,
+  calculateInitialSolutionStep,
+  calculateNextStep,
+  resolveReviewBoardFen,
+} from "./solution";
 function clockNow() {
   return Date.now();
 }
@@ -189,12 +195,13 @@ export default function ReviewPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [current, revealed, solutionSteps.length, stepSolution]);
 
-  const isReviewingSolution = answerShown || solutionStep > 0;
-  const boardPosition = isReviewingSolution
-    ? solutionStep === 0
-      ? (current?.fen ?? fen)
-      : (solutionSteps[solutionStep - 1]?.fen ?? current?.fen ?? fen)
-    : fen;
+  const boardPosition = resolveReviewBoardFen({
+    puzzleFen: current?.fen,
+    attemptFen: attempt?.fen,
+    answerShown,
+    solutionStep,
+    solutionSteps,
+  });
 
   function move(from: string, to: string, piece?: string) {
     if (!current || revealed || waitingForReply) return false;
@@ -243,7 +250,12 @@ export default function ReviewPage() {
     setAnswerShown(true);
     setSelectedSquare(null);
     setPromotion(null);
-    setSolutionStep(0);
+    setSolutionStep(
+      calculateInitialSolutionStep(
+        attempt?.moves.length ?? 0,
+        solutionSteps.length,
+      ),
+    );
     setMessage("已显示答案，请查看正确走法后选择复习评级。");
   }
   async function rate(rating: Rating) {
@@ -335,9 +347,12 @@ export default function ReviewPage() {
             />
           </Box>
           <Card className="p-7 [&_h2]:text-panel-title [&_p]:text-training-description">
-            <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
-              剩余 {queue.length} 道题目
-            </Box>
+            <Flex align="center" justify="between" gap="2">
+              <Box className="text-eyebrow font-emphasis tracking-eyebrow text-eyebrow-ink">
+                剩余 {queue.length} 道题目
+              </Box>
+              <CopyFenButton fen={boardPosition} onError={setMessage} />
+            </Flex>
             <Heading size="6" mt="2" mb="3">
               {current.title}
             </Heading>

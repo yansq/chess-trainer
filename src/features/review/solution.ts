@@ -6,6 +6,25 @@ export interface SolutionStepInfo {
   uci: string;
 }
 
+export interface ReviewBoardPositionInput {
+  puzzleFen: string | undefined;
+  attemptFen: string | undefined;
+  answerShown: boolean;
+  solutionStep: number;
+  solutionSteps: readonly SolutionStepInfo[];
+}
+
+export function resolveReviewBoardFen(
+  input: ReviewBoardPositionInput,
+): string | undefined {
+  if (!input.puzzleFen) return undefined;
+  if (input.answerShown || input.solutionStep > 0) {
+    if (input.solutionStep <= 0) return input.puzzleFen;
+    return input.solutionSteps[input.solutionStep - 1]?.fen ?? input.puzzleFen;
+  }
+  return input.attemptFen ?? input.puzzleFen;
+}
+
 export function buildSolutionSteps(
   fen: string | undefined,
   solutionLine: string[] | undefined,
@@ -25,6 +44,13 @@ export function buildSolutionSteps(
     currentFen = played.fen;
   }
   return steps;
+}
+
+export function calculateInitialSolutionStep(
+  playedMovesCount: number,
+  maxSteps: number,
+): number {
+  return Math.max(0, Math.min(maxSteps, playedMovesCount));
 }
 
 export function calculateNextStep(
