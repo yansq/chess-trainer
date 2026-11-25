@@ -3,10 +3,15 @@ use crate::db::repository::{
     ReviewVariation, Schedule, SyncCheckpoint,
 };
 use rusqlite::Connection;
-use std::sync::Mutex;
-use tauri::State;
+use std::sync::{Arc, Mutex};
+use tauri::{Manager, State};
 
-pub struct Database(pub Mutex<Connection>);
+pub struct Database(pub Arc<Mutex<Connection>>);
+impl Database {
+    pub fn new(conn: Connection) -> Self {
+        Self(Arc::new(Mutex::new(conn)))
+    }
+}
 fn db<'a>(state: &'a State<'_, Database>) -> Result<std::sync::MutexGuard<'a, Connection>, String> {
     state.0.lock().map_err(|_| "数据库锁已损坏".into())
 }
@@ -17,6 +22,14 @@ pub fn import_games(state: State<Database>, games: Vec<Game>) -> Result<usize, S
 #[tauri::command]
 pub fn list_games(state: State<Database>, filter: GameFilter) -> Result<GamePage, String> {
     repository::list_games(&*db(&state)?, filter)
+}
+#[tauri::command]
+pub fn game_offset(
+    state: State<Database>,
+    filter: GameFilter,
+    game_id: String,
+) -> Result<Option<i64>, String> {
+    repository::game_offset(&*db(&state)?, filter, &game_id)
 }
 #[tauri::command]
 pub fn get_game(state: State<Database>, id: String) -> Result<Game, String> {
@@ -326,4 +339,60 @@ pub async fn repertoire_add_move(
     notes: std::collections::HashMap<String, String>,
 ) -> Result<i64, String> {
     crate::db::repertoire::add_move(&*db(&state)?, &id, revision, node, notes)
+}
+
+pub struct BackupExportDir(pub std::path::PathBuf);
+
+#[tauri::command]
+pub async fn export_backup(
+    app: tauri::AppHandle,
+    state: State<'_, Database>,
+    preferences: crate::db::backup::ClientPreferences,
+) -> Result<crate::db::backup::BackupExport, String> {
+    let target_dir = match app.try_state::<BackupExportDir>() {
+        Some(override_dir) => override_dir.0.clone(),
+        None => app
+            .path()
+            .download_dir()
+            .or_else(|_| app.path().app_data_dir())
+            .map_err(|e| format!("无法获取导出目录：{e}"))?,
+    };
+    let version = app.package_info().version.to_string();
+    let conn = Arc::clone(&state.0);
+    tokio::task::spawn_blocking(move || {
+        let db = conn.lock().map_err(|_| "数据库锁已损坏".to_string())?;
+        crate::db::backup::export_to_dir(&db, &version, preferences, &target_dir)
+    })
+    .await
+    .map_err(|e| format!("备份导出任务异常：{e}"))?
+}
+
+#[tauri::command]
+pub async fn inspect_backup(
+    state: State<'_, Database>,
+    raw_json: String,
+) -> Result<crate::db::backup::BackupInspection, String> {
+    let conn = Arc::clone(&state.0);
+    tokio::task::spawn_blocking(move || {
+        let db = conn.lock().map_err(|_| "数据库锁已损坏".to_string())?;
+        crate::db::backup::inspect(&db, &raw_json)
+    })
+    .await
+    .map_err(|e| format!("备份检查任务异常：{e}"))?
+}
+
+#[tauri::command]
+pub async fn import_backup(
+    state: State<'_, Database>,
+    manager: State<'_, crate::engine::EngineManager>,
+    raw_json: String,
+) -> Result<crate::db::backup::BackupRestoreResult, String> {
+    manager.stop(None);
+    let conn = Arc::clone(&state.0);
+    tokio::task::spawn_blocking(move || {
+        let mut db = conn.lock().map_err(|_| "数据库锁已损坏".to_string())?;
+        crate::db::backup::import(&mut db, &raw_json)
+    })
+    .await
+    .map_err(|e| format!("备份恢复任务异常：{e}"))?
 }

@@ -146,3 +146,65 @@ export interface OpeningStat {
   winRate: number;
   scoreRate: number;
 }
+
+export type Appearance = "light" | "dark";
+
+export interface ClientPreferences {
+  appearance: Appearance;
+  sidebarCollapsed: boolean;
+  sound: {
+    enabled: boolean;
+    volume: number;
+  };
+}
+
+export interface BackupCounts {
+  games: number;
+  moves: number;
+  annotations: number;
+  reviewVariations: number;
+  puzzles: number;
+  reviewSchedules: number;
+  reviewLogs: number;
+  repertoires: number;
+  settings: number;
+}
+
+export type BackupWarningCode =
+  | "overwritesExistingData"
+  | "lichessTokenNotIncluded"
+  | "enginePathPreservedLocally"
+  | "engineCacheNotIncluded"
+  | "appVersionMismatch"
+  | "missingClientPreferences";
+
+export interface BackupWarning {
+  code: BackupWarningCode;
+  message: string;
+}
+
+export interface BackupExport {
+  filename: string;
+  savedPath: string;
+  exportedAt: string;
+  formatVersion: number;
+  dbSchemaVersion: number;
+  counts: BackupCounts;
+}
+
+export interface BackupInspection {
+  formatVersion: number;
+  dbSchemaVersion: number;
+  appVersion: string;
+  exportedAt: string;
+  backupCounts: BackupCounts;
+  currentCounts: BackupCounts;
+  hasClientPreferences: boolean;
+  warnings: BackupWarning[];
+}
+
+export interface BackupRestoreResult {
+  restoredCounts: BackupCounts;
+  clientPreferences: ClientPreferences | null;
+  warnings: BackupWarning[];
+}

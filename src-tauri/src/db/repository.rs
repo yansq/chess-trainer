@@ -316,11 +316,12 @@ fn write_games(tx: &Connection, games: Vec<Game>, update_ownership: bool) -> Res
     }
     Ok(count)
 }
+const GAME_FILTER_WHERE: &str = " WHERE (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR (CASE WHEN result=user_color THEN 'win' WHEN result='draw' THEN 'draw' WHEN result IN ('white','black') THEN 'loss' ELSE 'unknown' END)=?2) AND (?3 IS NULL OR speed=?3) AND (?4 IS NULL OR review_status=?4) AND (?5 IS NULL OR eco LIKE '%'||?5||'%' OR opening_name LIKE '%'||?5||'%') AND (?6 IS NULL OR is_bot=?6) AND (?7 IS NULL OR source=?7)";
+
 pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
-    let where_sql=" WHERE (?1 IS NULL OR user_color=?1) AND (?2 IS NULL OR (CASE WHEN result=user_color THEN 'win' WHEN result='draw' THEN 'draw' WHEN result IN ('white','black') THEN 'loss' ELSE 'unknown' END)=?2) AND (?3 IS NULL OR speed=?3) AND (?4 IS NULL OR review_status=?4) AND (?5 IS NULL OR eco LIKE '%'||?5||'%' OR opening_name LIKE '%'||?5||'%') AND (?6 IS NULL OR is_bot=?6) AND (?7 IS NULL OR source=?7)";
     let total = db
         .query_row(
-            &format!("SELECT COUNT(*) FROM games{where_sql}"),
+            &format!("SELECT COUNT(*) FROM games{GAME_FILTER_WHERE}"),
             params![
                 f.color,
                 f.result,
@@ -335,7 +336,7 @@ pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
         .map_err(err)?;
     let mut stmt = db
         .prepare(&format!(
-            "{GAME_SELECT}{where_sql} ORDER BY played_at DESC,id DESC LIMIT ?8 OFFSET ?9"
+            "{GAME_SELECT}{GAME_FILTER_WHERE} ORDER BY played_at DESC,id DESC LIMIT ?8 OFFSET ?9"
         ))
         .map_err(err)?;
     let items = stmt
@@ -357,6 +358,27 @@ pub fn list_games(db: &Connection, f: GameFilter) -> Result<GamePage, String> {
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(err)?;
     Ok(GamePage { items, total })
+}
+
+pub fn game_offset(db: &Connection, f: GameFilter, game_id: &str) -> Result<Option<i64>, String> {
+    db.query_row(
+        &format!(
+            "SELECT pos FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY played_at DESC, id DESC) - 1 AS pos FROM games{GAME_FILTER_WHERE}) WHERE id=?8"
+        ),
+        params![
+            f.color,
+            f.result,
+            f.speed,
+            f.reviewed,
+            f.opening,
+            f.opponent_type.is_bot(),
+            f.source,
+            game_id
+        ],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(err)
 }
 pub fn get_game(db: &Connection, id: &str) -> Result<Game, String> {
     let mut game = db
@@ -2147,5 +2169,62 @@ mod variation_tests {
         wrong_ply.fen_before = "wrong".into();
         assert!(save_review_variations(&db, "g", vec![wrong_ply]).is_err());
         assert_eq!(review_variations(&db, "g").unwrap(), vec![root]);
+    }
+    #[test]
+    fn game_offset_matches_list_games_order_and_filters() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate(&db).unwrap();
+        let make = |id: &str, played_at: &str, color: &str| Game {
+            id: id.into(),
+            source: "local".into(),
+            external_game_id: Some(id.into()),
+            played_at: Some(played_at.into()),
+            white_player: "w".into(),
+            black_player: "b".into(),
+            user_color: Some(color.into()),
+            result: "white".into(),
+            time_control: None,
+            speed: Some("blitz".into()),
+            rated: Some(true),
+            eco: Some("C50".into()),
+            opening_name: Some("Italian Game".into()),
+            pgn: "1. e4 e5 *".into(),
+            is_bot: false,
+            is_own_game: true,
+            review_status: false,
+            moves: vec![],
+        };
+        import_games(
+            &mut db,
+            vec![
+                make("g1", "2026-01-01T10:00:00Z", "white"),
+                make("g2", "2026-01-02T10:00:00Z", "black"),
+                make("g3", "2026-01-02T10:00:00Z", "white"),
+                make("g4", "2026-01-03T10:00:00Z", "white"),
+            ],
+        )
+        .unwrap();
+        let make_filter = |color: Option<&str>| GameFilter {
+            opponent_type: OpponentType::Human,
+            source: None,
+            color: color.map(Into::into),
+            result: None,
+            speed: None,
+            reviewed: None,
+            opening: None,
+            limit: 10,
+            offset: 0,
+        };
+        let listed = list_games(&db, make_filter(None)).unwrap();
+        for (idx, g) in listed.items.iter().enumerate() {
+            assert_eq!(
+                game_offset(&db, make_filter(None), &g.id).unwrap(),
+                Some(idx as i64)
+            );
+        }
+        assert_eq!(game_offset(&db, make_filter(Some("white")), "g4").unwrap(), Some(0));
+        assert_eq!(game_offset(&db, make_filter(Some("white")), "g3").unwrap(), Some(1));
+        assert_eq!(game_offset(&db, make_filter(Some("white")), "g1").unwrap(), Some(2));
+        assert_eq!(game_offset(&db, make_filter(Some("white")), "g2").unwrap(), None);
     }
 }

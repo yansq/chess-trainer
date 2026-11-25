@@ -700,7 +700,13 @@ export default function AnalysisPage() {
           </p>
         </Box>
         <Flex align="center" gap="3" className="shrink-0">
-          <Button size="1" variant="soft" onClick={() => navigateTo("/games")}>
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() =>
+              navigateTo("/games", { state: { returnGameId: game.id } })
+            }
+          >
             <ArrowLeft size={14} />
             返回对局列表
           </Button>

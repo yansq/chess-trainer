@@ -1,3 +1,4 @@
+pub mod backup;
 mod game_kind;
 pub mod migrations;
 mod openings;

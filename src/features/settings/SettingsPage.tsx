@@ -12,8 +12,9 @@ import {
   Text,
   TextField,
 } from "@radix-ui/themes";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../shared/api";
+import BackupSettings from "./BackupSettings";
 import SoundSettings from "./SoundSettings";
 import UpdateSettings from "../updates/UpdateSettings";
 
@@ -49,6 +50,94 @@ function AccountFeedback({
   );
 }
 
+interface SettingsSnapshot {
+  username?: string;
+  chessComUsername?: string;
+  enginePath?: string;
+  threads?: string;
+  hashMb?: string;
+  preanalysisDepth?: string;
+  positionDepth?: string;
+  thresholds?: { inaccuracy: number; mistake: number; blunder: number };
+  errorMessage?: string;
+}
+
+async function fetchSettingsSnapshot(): Promise<SettingsSnapshot> {
+  const [
+    lichessResult,
+    chesscomResult,
+    enginePathResult,
+    threadsResult,
+    hashMbResult,
+    preanalysisResult,
+    positionResult,
+    inaccuracyResult,
+    mistakeResult,
+    blunderResult,
+  ] = await Promise.allSettled([
+    api.getSetting("lichess_username"),
+    api.getSetting("chesscom_username"),
+    api.getSetting("engine_path"),
+    api.getSetting("engine_threads"),
+    api.getSetting("engine_hash_mb"),
+    getEngineDepth("preanalysis"),
+    getEngineDepth("position"),
+    api.getSetting("loss_inaccuracy"),
+    api.getSetting("loss_mistake"),
+    api.getSetting("loss_blunder"),
+  ]);
+
+  const snapshot: SettingsSnapshot = {};
+  if (lichessResult.status === "fulfilled") {
+    snapshot.username = lichessResult.value ?? "";
+  } else {
+    snapshot.errorMessage = String(lichessResult.reason);
+  }
+  if (chesscomResult.status === "fulfilled") {
+    snapshot.chessComUsername = chesscomResult.value ?? "";
+  } else {
+    snapshot.errorMessage = String(chesscomResult.reason);
+  }
+  if (enginePathResult.status === "fulfilled") {
+    snapshot.enginePath =
+      enginePathResult.value ?? "/opt/homebrew/bin/stockfish";
+  }
+  if (
+    threadsResult.status === "fulfilled" &&
+    hashMbResult.status === "fulfilled"
+  ) {
+    snapshot.threads = threadsResult.value ?? "4";
+    snapshot.hashMb = hashMbResult.value ?? "256";
+  } else if (threadsResult.status === "rejected") {
+    snapshot.errorMessage = `引擎参数加载失败：${String(threadsResult.reason)}`;
+  } else if (hashMbResult.status === "rejected") {
+    snapshot.errorMessage = `引擎参数加载失败：${String(hashMbResult.reason)}`;
+  }
+  if (
+    preanalysisResult.status === "fulfilled" &&
+    positionResult.status === "fulfilled"
+  ) {
+    snapshot.preanalysisDepth = String(preanalysisResult.value);
+    snapshot.positionDepth = String(positionResult.value);
+  } else if (preanalysisResult.status === "rejected") {
+    snapshot.errorMessage = `分析深度加载失败：${String(preanalysisResult.reason)}`;
+  } else if (positionResult.status === "rejected") {
+    snapshot.errorMessage = `分析深度加载失败：${String(positionResult.reason)}`;
+  }
+  if (
+    inaccuracyResult.status === "fulfilled" &&
+    mistakeResult.status === "fulfilled" &&
+    blunderResult.status === "fulfilled"
+  ) {
+    snapshot.thresholds = {
+      inaccuracy: Number(inaccuracyResult.value ?? 0.12) * 100,
+      mistake: Number(mistakeResult.value ?? 0.25) * 100,
+      blunder: Number(blunderResult.value ?? 0.4) * 100,
+    };
+  }
+  return snapshot;
+}
+
 export default function SettingsPage() {
   const [username, setUsername] = useState("");
   const [chessComUsername, setChessComUsername] = useState("");
@@ -70,69 +159,42 @@ export default function SettingsPage() {
   const [chessFeedback, setChessFeedback] =
     useState<AccountFeedbackState | null>(null);
 
+  const applySnapshot = useCallback((snapshot: SettingsSnapshot) => {
+    if (snapshot.username !== undefined) setUsername(snapshot.username);
+    if (snapshot.chessComUsername !== undefined) {
+      setChessComUsername(snapshot.chessComUsername);
+    }
+    if (snapshot.enginePath !== undefined) setEnginePath(snapshot.enginePath);
+    if (snapshot.threads !== undefined) setThreads(snapshot.threads);
+    if (snapshot.hashMb !== undefined) setHashMb(snapshot.hashMb);
+    if (snapshot.preanalysisDepth !== undefined) {
+      setPreanalysisDepth(snapshot.preanalysisDepth);
+    }
+    if (snapshot.positionDepth !== undefined) {
+      setPositionDepth(snapshot.positionDepth);
+    }
+    if (snapshot.thresholds !== undefined) setThresholds(snapshot.thresholds);
+    if (snapshot.errorMessage !== undefined) setMessage(snapshot.errorMessage);
+  }, []);
+
+  const reloadSettings = useCallback(async () => {
+    setToken("");
+    setLichessFeedback(null);
+    setChessFeedback(null);
+    setMessage("");
+    const snapshot = await fetchSettingsSnapshot();
+    applySnapshot(snapshot);
+  }, [applySnapshot]);
+
   useEffect(() => {
     let active = true;
-    api
-      .getSetting("lichess_username")
-      .then((v) => {
-        if (active) setUsername(v ?? "");
-      })
-      .catch((e) => {
-        if (active) setMessage(String(e));
-      });
-    api
-      .getSetting("chesscom_username")
-      .then((value) => {
-        if (active) setChessComUsername(value ?? "");
-      })
-      .catch((error) => {
-        if (active) setMessage(String(error));
-      });
-    api
-      .getSetting("engine_path")
-      .then((v) => {
-        if (active) setEnginePath(v ?? "/opt/homebrew/bin/stockfish");
-      })
-      .catch(() => {});
-    Promise.all([
-      api.getSetting("engine_threads"),
-      api.getSetting("engine_hash_mb"),
-    ])
-      .then(([threads, hashMb]) => {
-        if (!active) return;
-        setThreads(threads ?? "4");
-        setHashMb(hashMb ?? "256");
-      })
-      .catch((e) => {
-        if (active) setMessage(`引擎参数加载失败：${String(e)}`);
-      });
-    Promise.all([getEngineDepth("preanalysis"), getEngineDepth("position")])
-      .then(([preanalysis, position]) => {
-        if (!active) return;
-        setPreanalysisDepth(String(preanalysis));
-        setPositionDepth(String(position));
-      })
-      .catch((e) => {
-        if (active) setMessage(`分析深度加载失败：${String(e)}`);
-      });
-    Promise.all(
-      ["loss_inaccuracy", "loss_mistake", "loss_blunder"].map((k) =>
-        api.getSetting(k),
-      ),
-    )
-      .then(([a, b, c]) => {
-        if (!active) return;
-        setThresholds({
-          inaccuracy: Number(a ?? 0.12) * 100,
-          mistake: Number(b ?? 0.25) * 100,
-          blunder: Number(c ?? 0.4) * 100,
-        });
-      })
-      .catch(() => {});
+    void fetchSettingsSnapshot().then((snapshot) => {
+      if (active) applySnapshot(snapshot);
+    });
     return () => {
       active = false;
     };
-  }, []);
+  }, [applySnapshot]);
 
   async function saveUsername() {
     const value = username.trim();
@@ -343,6 +405,7 @@ export default function SettingsPage() {
         </Callout.Root>
       )}
       <UpdateSettings />
+      <BackupSettings onRestored={reloadSettings} />
       <SoundSettings />
       <Card size="3" mb="4" className="max-w-155">
         <Flex direction="column" gap="4">

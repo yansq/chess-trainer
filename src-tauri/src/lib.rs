@@ -15,7 +15,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db = rusqlite::Connection::open(dir.join("chess-trainer.db"))?;
             db::migrations::migrate(&db)?;
-            app.manage(Database(std::sync::Mutex::new(db)));
+            app.manage(Database::new(db));
             app.manage(engine::EngineManager::new());
             Ok(())
         })
@@ -27,6 +27,7 @@ pub fn run() {
             commands::repertoire_delete,
             commands::import_games,
             commands::list_games,
+            commands::game_offset,
             commands::get_game,
             commands::get_review_variations,
             commands::save_review_variations,
@@ -57,7 +58,10 @@ pub fn run() {
             commands::engine_analyze,
             commands::engine_stop,
             commands::save_lichess_token,
-            commands::engine_validate
+            commands::engine_validate,
+            commands::export_backup,
+            commands::inspect_backup,
+            commands::import_backup
         ])
         .run(tauri::generate_context!())
         .expect("Chess Trainer failed to start");

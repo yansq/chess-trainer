@@ -61,7 +61,7 @@ pub fn list(db: &Connection) -> Result<Vec<Summary>, String> {
     })
     .collect()
 }
-fn validate(book: &Repertoire) -> Result<(), String> {
+pub(crate) fn validate(book: &Repertoire) -> Result<(), String> {
     if book.id.is_empty()
         || book.name.trim().is_empty()
         || book.name.len() > 300

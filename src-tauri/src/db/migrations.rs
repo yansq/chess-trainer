@@ -1,5 +1,7 @@
 use rusqlite::{Connection, Result};
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 9;
+
 pub fn migrate(db: &Connection) -> Result<()> {
     db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;")?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -81,7 +83,7 @@ pub fn migrate(db: &Connection) -> Result<()> {
                difficulty = CASE WHEN repetitions > 0 THEN MAX(1.0, MIN(10.0, 10.0 - (ease_factor - 1.3) / 1.2 * 9.0)) ELSE 0.0 END
              WHERE stability = 0.0 AND repetitions > 0;",
         )?;
-        tx.pragma_update(None, "user_version", 9)?;
+        tx.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
         tx.commit()?;
     }
     Ok(())

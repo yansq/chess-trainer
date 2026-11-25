@@ -1,5 +1,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  BackupExport,
+  BackupInspection,
+  BackupRestoreResult,
+  ClientPreferences,
   Game,
   ChessComGame,
   ChessComSyncState,
@@ -33,6 +37,8 @@ export const api = {
   importGames: (games: GameImport[]) =>
     invoke<number>("import_games", { games }),
   listGames: (filter: GameFilter) => invoke<GamePage>("list_games", { filter }),
+  gameOffset: (filter: GameFilter, gameId: string) =>
+    invoke<number | null>("game_offset", { filter, gameId }),
   getGame: (id: string) => invoke<Game>("get_game", { id }),
   getReviewVariations: (gameId: string) =>
     invoke<ReviewVariation[]>("get_review_variations", { gameId }),
@@ -145,4 +151,10 @@ export const api = {
   engineValidate: (path: string) => invoke<void>("engine_validate", { path }),
   saveLichessToken: (username: string, token: string) =>
     invoke<void>("save_lichess_token", { username, token }),
+  exportBackup: (preferences: ClientPreferences) =>
+    invoke<BackupExport>("export_backup", { preferences }),
+  inspectBackup: (rawJson: string) =>
+    invoke<BackupInspection>("inspect_backup", { rawJson }),
+  importBackup: (rawJson: string) =>
+    invoke<BackupRestoreResult>("import_backup", { rawJson }),
 };

@@ -15,9 +15,12 @@ import {
 interface SyncStore {
   running: boolean;
   pausing: boolean;
+  maintenanceBlocked: boolean;
   message: string;
   pending: boolean;
   revision: number;
+  setMaintenanceBlocked: (blocked: boolean) => void;
+  onBackupRestored: () => Promise<void>;
   refresh: () => Promise<void>;
   start: () => Promise<void>;
   pause: () => void;
@@ -26,9 +29,18 @@ interface SyncStore {
 export const useGameSync = create<SyncStore>((set, get) => ({
   running: false,
   pausing: false,
+  maintenanceBlocked: false,
   message: "",
   pending: false,
   revision: 0,
+  setMaintenanceBlocked: (maintenanceBlocked) => set({ maintenanceBlocked }),
+  onBackupRestored: async () => {
+    set((state) => ({
+      message: "",
+      revision: state.revision + 1,
+    }));
+    await get().refresh();
+  },
   refresh: async () => {
     if (get().running) return;
     try {
@@ -50,7 +62,7 @@ export const useGameSync = create<SyncStore>((set, get) => ({
   },
   pause: () => set({ pausing: true }),
   start: async () => {
-    if (get().running) return;
+    if (get().running || get().maintenanceBlocked) return;
     set({ running: true, pausing: false, message: "正在准备同步…" });
     const messages = new Map<string, string>();
     const report = (platform: string, message: string) => {

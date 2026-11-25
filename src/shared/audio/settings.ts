@@ -12,6 +12,7 @@ interface SoundSettings {
   volume: number;
   setEnabled: (enabled: boolean) => void;
   setVolume: (volume: number) => void;
+  apply: (next: { enabled: boolean; volume: number }) => void;
 }
 
 export const useSoundSettings = create<SoundSettings>()(
@@ -21,6 +22,11 @@ export const useSoundSettings = create<SoundSettings>()(
       volume: 70,
       setEnabled: (enabled) => set({ enabled }),
       setVolume: (volume) => set({ volume: normalizeVolume(volume) }),
+      apply: (next) =>
+        set({
+          enabled: Boolean(next.enabled),
+          volume: normalizeVolume(next.volume),
+        }),
     }),
     {
       name: "chess-trainer-sound",

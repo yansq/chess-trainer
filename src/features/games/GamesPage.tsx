@@ -12,7 +12,7 @@ import {
   TextField,
 } from "@radix-ui/themes";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Upload, RefreshCw, Pause } from "lucide-react";
 import { api } from "../../shared/api";
 import { gameSourceLabel } from "../../shared/types";
@@ -20,18 +20,8 @@ import { GameSourceSelect } from "../../shared/ui/GameSourceSelect";
 import type { GameFilter, GameImport, GamePage } from "../../shared/types";
 import { OpponentTypeSelect } from "../../shared/ui/OpponentTypeSelect";
 import { Select } from "../../shared/ui/select";
+import { offsetForIndex, useGamesFilterStore } from "./filter-store";
 import { useGameSync } from "./sync-store";
-const initial: GameFilter = {
-  opponentType: "human",
-  source: null,
-  color: null,
-  result: null,
-  speed: null,
-  reviewed: null,
-  opening: null,
-  limit: 10,
-  offset: 0,
-};
 function resultLabel(result: string, color: string | null) {
   if (result === "draw") return "和";
   if (!color || result === "unknown") return "未知";
@@ -69,7 +59,15 @@ function parseLocalPgnInWorker(
 export default function GamesPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
-  const [filter, setFilter] = useState(initial);
+  const location = useLocation();
+  const rawReturnGameId = (location.state as { returnGameId?: unknown } | null)
+    ?.returnGameId;
+  const returnGameId =
+    typeof rawReturnGameId === "string" && rawReturnGameId.length > 0
+      ? rawReturnGameId
+      : null;
+  const filter = useGamesFilterStore((s) => s.filter);
+  const setFilter = useGamesFilterStore((s) => s.setFilter);
   const [page, setPage] = useState<GamePage>({ items: [], total: 0 });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,28 +83,44 @@ export default function GamesPage() {
     : 0;
   useEffect(() => {
     let active = true;
-    api
-      .listGames(filter)
-      .then((result) => {
-        if (!active) return;
-        if (filter.offset > 0 && filter.offset >= result.total) {
-          setFilter((previous) => ({
-            ...previous,
-            offset:
-              Math.max(0, Math.ceil(result.total / filter.limit) - 1) *
-              filter.limit,
-          }));
-          return;
+    async function load() {
+      if (returnGameId) {
+        let locatedOffset: number | null = null;
+        try {
+          const index = await api.gameOffset(filter, returnGameId);
+          if (!active) return;
+          if (index !== null) {
+            locatedOffset = offsetForIndex(index, filter.limit);
+          }
+        } catch {
+          if (!active) return;
         }
-        setPage(result);
-      })
-      .catch((e) => {
-        if (active) setMessage(String(e));
-      });
+        if (locatedOffset !== null && locatedOffset !== filter.offset) {
+          setFilter((previous) => ({ ...previous, offset: locatedOffset }));
+        }
+        nav("/games", { replace: true, state: null });
+        return;
+      }
+      const result = await api.listGames(filter);
+      if (!active) return;
+      if (filter.offset > 0 && filter.offset >= result.total) {
+        setFilter((previous) => ({
+          ...previous,
+          offset:
+            Math.max(0, Math.ceil(result.total / filter.limit) - 1) *
+            filter.limit,
+        }));
+        return;
+      }
+      setPage(result);
+    }
+    void load().catch((e) => {
+      if (active) setMessage(String(e));
+    });
     return () => {
       active = false;
     };
-  }, [filter, sync.revision]);
+  }, [filter, nav, returnGameId, setFilter, sync.revision]);
   useEffect(() => {
     void refreshSync();
   }, [refreshSync]);
@@ -148,6 +162,7 @@ export default function GamesPage() {
   }
   const change = (patch: Partial<GameFilter>) =>
     setFilter((f) => ({ ...f, ...patch, offset: 0 }));
+  const statusMessage = [sync.message, message].filter(Boolean).join("；");
   return (
     <>
       <Flex
@@ -157,12 +172,27 @@ export default function GamesPage() {
         gap="5"
         className="[&_p]:m-0 [&_p]:text-sm [&_p]:text-description"
       >
-        <Box>
+        <Box className="shrink-0">
           <Heading as="h1" size="7">
             对局
           </Heading>
         </Box>
-        <Flex className="gap-3">
+        {statusMessage && (
+          <Flex
+            align="center"
+            justify="end"
+            className="min-w-0 flex-1 overflow-hidden"
+          >
+            <Box
+              role="status"
+              title={statusMessage}
+              className="max-w-full truncate rounded-control border border-panel-edge bg-panel px-3 py-1.5 text-xs leading-4 text-description"
+            >
+              {statusMessage}
+            </Box>
+          </Flex>
+        )}
+        <Flex className="shrink-0 gap-3">
           <Button
             variant="soft"
             disabled={busy || sync.running}
@@ -273,16 +303,6 @@ export default function GamesPage() {
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
-      {message && (
-        <Callout.Root size="1" className="mb-5">
-          <Callout.Text>{message}</Callout.Text>
-        </Callout.Root>
-      )}
-      {sync.message && (
-        <Callout.Root size="1" className="mb-5" role="status">
-          <Callout.Text>{sync.message}</Callout.Text>
-        </Callout.Root>
-      )}
       <Card className="mb-5 flex flex-wrap gap-3 p-4 [&>*]:min-w-31.25 [&>*]:flex-1">
         <GameSourceSelect
           value={filter.source ?? null}
