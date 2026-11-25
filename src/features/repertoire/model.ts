@@ -123,6 +123,121 @@ export const moveLabel = (node: RepertoireNode) =>
   node.uci === "@fen"
     ? `${node.san} · 第 ${node.fenAfter.split(" ")[5]} 回合`
     : `${node.fenBefore.split(" ")[5]}${node.fenBefore.split(" ")[1] === "w" ? "." : "…"} ${node.san}`;
+
+export interface RepertoireChain {
+  nodes: RepertoireNode[];
+  head: RepertoireNode;
+  tail: RepertoireNode;
+  siblingIndex: number;
+  children: RepertoireChain[];
+  truncated?: boolean;
+}
+
+export function buildRepertoireChains(
+  book: Repertoire,
+  maxDepth = 128,
+): RepertoireChain[] {
+  const childrenByParent = new Map<string | null, RepertoireNode[]>();
+  for (const node of book.nodes) {
+    const list = childrenByParent.get(node.parentId);
+    if (list) list.push(node);
+    else childrenByParent.set(node.parentId, [node]);
+  }
+  for (const list of childrenByParent.values()) {
+    list.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  }
+
+  function build(
+    parentId: string | null,
+    depth: number,
+    ancestry: Set<string>,
+  ): RepertoireChain[] {
+    if (depth > maxDepth) return [];
+    const siblings = childrenByParent.get(parentId) ?? [];
+    return siblings.map((head, siblingIndex) => {
+      if (ancestry.has(head.id)) {
+        return {
+          nodes: [head],
+          head,
+          tail: head,
+          siblingIndex,
+          children: [],
+          truncated: true,
+        };
+      }
+      const nodes: RepertoireNode[] = [head];
+      const seen = new Set(ancestry);
+      seen.add(head.id);
+      let tail = head;
+
+      for (;;) {
+        const nextChildren = childrenByParent.get(tail.id) ?? [];
+        if (nextChildren.length === 0) {
+          return {
+            nodes,
+            head,
+            tail,
+            siblingIndex,
+            children: [],
+          };
+        }
+        if (nextChildren.length === 1 && nextChildren[0].uci !== "@fen") {
+          const next = nextChildren[0];
+          if (seen.has(next.id)) {
+            return {
+              nodes,
+              head,
+              tail,
+              siblingIndex,
+              children: [],
+              truncated: true,
+            };
+          }
+          nodes.push(next);
+          seen.add(next.id);
+          tail = next;
+          continue;
+        }
+        if (depth >= maxDepth) {
+          return {
+            nodes,
+            head,
+            tail,
+            siblingIndex,
+            children: [],
+            truncated: true,
+          };
+        }
+        return {
+          nodes,
+          head,
+          tail,
+          siblingIndex,
+          children: build(tail.id, depth + 1, seen),
+        };
+      }
+    });
+  }
+
+  return build(null, 0, new Set());
+}
+
+export function chainMoveLabel(
+  node: RepertoireNode,
+  previous?: RepertoireNode,
+): string {
+  if (node.uci === "@fen") return moveLabel(node);
+  const [, turn, , , , moveNumber] = node.fenBefore.split(" ");
+  if (turn === "w") return `${moveNumber}.${node.san}`;
+  if (
+    previous &&
+    previous.uci !== "@fen" &&
+    previous.fenBefore.split(" ")[1] === "w"
+  ) {
+    return node.san;
+  }
+  return `${moveNumber}...${node.san}`;
+}
 export function deleteBranch(book: Repertoire, id: string) {
   const removed = new Set([id]);
   for (const node of book.nodes)

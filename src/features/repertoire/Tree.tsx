@@ -1,13 +1,17 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Button, ContextMenu, IconButton } from "@radix-ui/themes";
-import { ChevronDown, ChevronRight, FileText, CircleSlash } from "lucide-react";
+import { Button, ContextMenu } from "@radix-ui/themes";
+import { CircleSlash, FileText, Minus, Plus } from "lucide-react";
 import {
+  buildRepertoireChains,
+  chainMoveLabel,
   moveLabel,
   pathTo,
   positionKey,
   type Repertoire,
+  type RepertoireChain,
   type RepertoireNode,
 } from "./model";
+
 const annotationSymbols: Record<string, string> = {
   $1: "!",
   $2: "?",
@@ -16,6 +20,7 @@ const annotationSymbols: Record<string, string> = {
   $5: "!?",
   $6: "?!",
 };
+
 interface Props {
   book: Repertoire;
   currentId: string | null;
@@ -25,6 +30,23 @@ interface Props {
   promote: (id: string) => void;
   remove: (id: string) => void;
 }
+
+function collectDefaultOpenIds(chains: RepertoireChain[]) {
+  const all: string[] = [];
+  const roots: string[] = [];
+  function walk(list: RepertoireChain[], isRoot: boolean) {
+    for (const chain of list) {
+      if (chain.children.length > 0) {
+        all.push(chain.tail.id);
+        if (isRoot) roots.push(chain.tail.id);
+        walk(chain.children, false);
+      }
+    }
+  }
+  walk(chains, true);
+  return all.length <= 200 ? all : roots;
+}
+
 export default memo(function RepertoireTree({
   book,
   currentId,
@@ -34,23 +56,18 @@ export default memo(function RepertoireTree({
   promote,
   remove,
 }: Props) {
-  const [opened, setOpened] = useState<Set<string>>(
-    () => new Set(book.nodes.filter((n) => !n.parentId).map((n) => n.id)),
+  const chains = useMemo(() => buildRepertoireChains(book), [book]);
+  const defaultOpenIds = useMemo(() => collectDefaultOpenIds(chains), [chains]);
+  const [opened, setOpened] = useState<Set<string> | null>(() =>
+    defaultOpenIds.length ? new Set(defaultOpenIds) : null,
   );
   const [collapsed, setCollapsed] = useState<Map<string, string | null>>(
     () => new Map(),
   );
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string | null, RepertoireNode[]>();
-    for (const node of book.nodes) {
-      const list = map.get(node.parentId) ?? [];
-      list.push(node);
-      map.set(node.parentId, list);
-    }
-    for (const list of map.values())
-      list.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-    return map;
-  }, [book.nodes]);
+  const effectiveOpened = useMemo(
+    () => opened ?? new Set(defaultOpenIds),
+    [opened, defaultOpenIds],
+  );
   const selected = useRef<HTMLButtonElement>(null);
   const path = useMemo(
     () =>
@@ -61,106 +78,157 @@ export default memo(function RepertoireTree({
       ),
     [book, currentId],
   );
+
   useEffect(() => {
     selected.current?.scrollIntoView({ block: "nearest" });
   }, [currentId]);
-  function render(
-    parentId: string | null,
+
+  function renderChains(
+    list: RepertoireChain[],
     inactive = false,
-    depth = 0,
+    isRoot = true,
   ): React.ReactNode {
-    if (depth > 128) return <p>线路过深，请使用棋盘导航查看。</p>;
-    return (childrenByParent.get(parentId) ?? []).map((node, index) => {
-      const children = childrenByParent.get(node.id) ?? [];
+    return list.map((chain) => {
+      const hasChildren = chain.children.length > 0;
+      const tailId = chain.tail.id;
       const open =
-        !(collapsed.has(node.id) && collapsed.get(node.id) === currentId) &&
-        (opened.has(node.id) ||
-          path.has(node.id) ||
-          (node.id === currentId && children.length > 1));
-      const disabled = inactive || node.disabled;
+        hasChildren &&
+        !(collapsed.has(tailId) && collapsed.get(tailId) === currentId) &&
+        (effectiveOpened.has(tailId) ||
+          path.has(tailId) ||
+          tailId === currentId);
+
+      let branchDisabled = inactive;
+      const moveItems = chain.nodes.map((node, nodeIndex) => {
+        const nodeDisabled = branchDisabled || node.disabled;
+        branchDisabled = nodeDisabled;
+        const previous = nodeIndex > 0 ? chain.nodes[nodeIndex - 1] : undefined;
+        const label = chainMoveLabel(node, previous);
+        const nags = node.nags
+          .map((nag) => annotationSymbols[nag] ?? "")
+          .join("");
+        const hasNote = Boolean(book.notes[positionKey(node.fenAfter)]);
+        const isSelected = currentId === node.id;
+
+        return (
+          <ContextMenu.Root key={node.id}>
+            <ContextMenu.Trigger>
+              <button
+                ref={isSelected ? selected : undefined}
+                type="button"
+                disabled={busy}
+                onClick={() => select(node.id)}
+                aria-current={isSelected ? "step" : undefined}
+                title={moveLabel(node)}
+                className={`inline-flex items-center gap-0.5 rounded-control-sm px-0.5 py-0.5 text-left text-body-sm leading-compact transition-colors hover:bg-nav-hover focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50 ${
+                  isSelected
+                    ? "bg-selected font-semibold text-accent-ink"
+                    : nodeDisabled
+                      ? "text-muted"
+                      : "font-normal text-move"
+                }`}
+              >
+                <span>
+                  {label}
+                  {nags}
+                </span>
+                {nodeDisabled && (
+                  <CircleSlash
+                    size={11}
+                    className="shrink-0"
+                    aria-label="已禁用"
+                  />
+                )}
+                {hasNote && (
+                  <FileText
+                    size={11}
+                    className="shrink-0"
+                    aria-label="有局面评注"
+                  />
+                )}
+              </button>
+            </ContextMenu.Trigger>
+            <ContextMenu.Content size="1">
+              <ContextMenu.Item
+                disabled={
+                  busy || (nodeIndex === 0 ? chain.siblingIndex === 0 : true)
+                }
+                onSelect={() => promote(node.id)}
+              >
+                设为主线
+              </ContextMenu.Item>
+              <ContextMenu.Item disabled={busy} onSelect={() => toggle(node)}>
+                {node.disabled ? "启用分支" : "禁用分支"}
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item
+                color="red"
+                disabled={busy}
+                onSelect={() => remove(node.id)}
+              >
+                删除分支
+              </ContextMenu.Item>
+            </ContextMenu.Content>
+          </ContextMenu.Root>
+        );
+      });
+
+      const branchClass = isRoot
+        ? "cv-row"
+        : hasChildren
+          ? "repertoire-chain-branch repertoire-chain-branch-parent"
+          : "repertoire-chain-branch";
+
       return (
-        <div key={node.id} className="cv-row">
-          <div className="flex min-w-0 items-center gap-1 py-0.5">
-            {children.length > 0 ? (
-              <IconButton
-                size="1"
-                variant="ghost"
-                aria-label={`${open ? "折叠" : "展开"} ${moveLabel(node)}`}
+        <div key={chain.head.id} className={branchClass}>
+          <div
+            className={
+              open
+                ? "repertoire-chain-row repertoire-chain-row-open"
+                : "repertoire-chain-row"
+            }
+          >
+            {hasChildren && (
+              <button
+                type="button"
+                className="repertoire-tree-toggle"
+                aria-label={`${open ? "折叠" : "展开"} ${moveLabel(chain.tail)}`}
+                aria-expanded={open}
                 onClick={() => {
                   setCollapsed((prior) => {
                     const next = new Map(prior);
-                    if (open) next.set(node.id, currentId);
-                    else next.delete(node.id);
+                    if (open) next.set(tailId, currentId);
+                    else next.delete(tailId);
                     return next;
                   });
                   setOpened((prior) => {
-                    const next = new Set(prior);
-                    if (open) next.delete(node.id);
-                    else next.add(node.id);
+                    const next = new Set(prior ?? defaultOpenIds);
+                    if (open) next.delete(tailId);
+                    else next.add(tailId);
                     return next;
                   });
                 }}
               >
-                {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </IconButton>
-            ) : (
-              <span className="w-6 shrink-0" aria-hidden="true" />
+                {open ? <Minus size={10} /> : <Plus size={10} />}
+              </button>
             )}
-            <ContextMenu.Root>
-              <ContextMenu.Trigger>
-                <Button
-                  ref={currentId === node.id ? selected : undefined}
-                  size="1"
-                  color="gray"
-                  variant={currentId === node.id ? "soft" : "ghost"}
-                  disabled={busy}
-                  onClick={() => select(node.id)}
-                  aria-current={currentId === node.id ? "step" : undefined}
-                  className={`m-0 h-auto min-w-0 justify-start gap-1 px-1 py-1 font-normal ${disabled ? "text-muted" : "text-move"}`}
-                  title={moveLabel(node)}
-                >
-                  <span className="truncate">
-                    {moveLabel(node)}
-                    {node.nags
-                      .map((nag) => annotationSymbols[nag] ?? "")
-                      .join("")}
-                  </span>
-                  {disabled && <CircleSlash size={12} aria-label="已禁用" />}
-                  {book.notes[positionKey(node.fenAfter)] && (
-                    <FileText size={12} aria-label="有局面评注" />
-                  )}
-                </Button>
-              </ContextMenu.Trigger>
-              <ContextMenu.Content size="1">
-                <ContextMenu.Item
-                  disabled={busy || index === 0}
-                  onSelect={() => promote(node.id)}
-                >
-                  设为主线
-                </ContextMenu.Item>
-                <ContextMenu.Item disabled={busy} onSelect={() => toggle(node)}>
-                  {node.disabled ? "启用分支" : "禁用分支"}
-                </ContextMenu.Item>
-                <ContextMenu.Separator />
-                <ContextMenu.Item
-                  color="red"
-                  disabled={busy}
-                  onSelect={() => remove(node.id)}
-                >
-                  删除分支
-                </ContextMenu.Item>
-              </ContextMenu.Content>
-            </ContextMenu.Root>
-          </div>
-          {open && children.length > 0 && (
-            <div className="ml-3 border-l border-panel-edge pl-2">
-              {render(node.id, disabled, depth + 1)}
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-0.5 gap-y-0.5">
+              {moveItems}
             </div>
+          </div>
+          {open && (
+            <div>{renderChains(chain.children, branchDisabled, false)}</div>
+          )}
+          {chain.truncated && (
+            <p className="py-0.5 text-xs text-muted">
+              线路过深，请使用棋盘导航查看。
+            </p>
           )}
         </div>
       );
     });
   }
+
   return (
     <div
       className="min-h-0 overflow-auto overscroll-contain p-2"
@@ -176,7 +244,7 @@ export default memo(function RepertoireTree({
       >
         初始局面
       </Button>
-      {render(null)}
+      {renderChains(chains)}
       {!book.nodes.length && (
         <p className="p-2 text-sm text-muted">
           在棋盘上走棋，或导入 PGN 添加线路。

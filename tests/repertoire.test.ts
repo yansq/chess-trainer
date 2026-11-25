@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Chess } from "chess.js";
 import {
   addMove,
+  buildRepertoireChains,
+  chainMoveLabel,
   childrenOf,
   deleteBranch,
   endOfLine,
   exportRepertoirePgn,
   importRepertoirePgn,
+  moveLabel,
   newRepertoire,
   pathTo,
   positionKey,
@@ -220,5 +223,112 @@ describe("teaching PGN compatibility", () => {
     expect(endOfLine(book, d5.id)).toBe(d5.id);
     const promoted = promoteNode(book, e5.id);
     expect(endOfLine(promoted, null)).toBe(nc6.id);
+  });
+});
+
+describe("compressed repertoire chains", () => {
+  const labels = (nodes: ReturnType<typeof buildRepertoireChains>[number]["nodes"]) =>
+    nodes.map((node, index) =>
+      chainMoveLabel(node, index > 0 ? nodes[index - 1] : undefined),
+    );
+
+  it("collapses a single linear line into one chain with compact move labels", () => {
+    const book = importRepertoirePgn(base(), "1.e4 e5 2.Nf3 Nc6 3.Bb5 *");
+    const chains = buildRepertoireChains(book);
+    expect(chains).toHaveLength(1);
+    const [chain] = chains;
+    expect(chain.siblingIndex).toBe(0);
+    expect(chain.head.san).toBe("e4");
+    expect(chain.tail.san).toBe("Bb5");
+    expect(chain.children).toEqual([]);
+    expect(labels(chain.nodes)).toEqual(["1.e4", "e5", "2.Nf3", "Nc6", "3.Bb5"]);
+  });
+
+  it("splits at branching nodes and prefixes black-headed child chains with N...san", () => {
+    const book = importRepertoirePgn(
+      base(),
+      "1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5 (3...Nf6 4.d4 exd4) 4.c3 Nf6 (4...d6 5.d4) 5.d4 *",
+    );
+    const chains = buildRepertoireChains(book);
+    expect(chains).toHaveLength(1);
+    const [trunk] = chains;
+    expect(labels(trunk.nodes)).toEqual([
+      "1.e4",
+      "e5",
+      "2.Nf3",
+      "Nc6",
+      "3.Bc4",
+    ]);
+    expect(trunk.children).toHaveLength(2);
+
+    const [main, alt] = trunk.children;
+    expect(main.siblingIndex).toBe(0);
+    expect(labels(main.nodes)).toEqual(["3...Bc5", "4.c3"]);
+    expect(main.children).toHaveLength(2);
+    expect(labels(main.children[0].nodes)).toEqual(["4...Nf6", "5.d4"]);
+    expect(main.children[0].children).toEqual([]);
+    expect(labels(main.children[1].nodes)).toEqual(["4...d6", "5.d4"]);
+    expect(main.children[1].children).toEqual([]);
+
+    expect(alt.siblingIndex).toBe(1);
+    expect(labels(alt.nodes)).toEqual(["3...Nf6", "4.d4", "exd4"]);
+    expect(alt.children).toEqual([]);
+  });
+
+  it("creates multiple top-level chains with accurate siblingIndex for multiple root moves", () => {
+    const book = importRepertoirePgn(
+      base(),
+      '[Event "A"]\n\n1.e4 e5 *\n\n[Event "B"]\n\n1.d4 d5 *\n\n[Event "C"]\n\n1.c4 e5 *',
+    );
+    const chains = buildRepertoireChains(book);
+    expect(chains).toHaveLength(3);
+    expect(chains.map((c) => c.siblingIndex)).toEqual([0, 1, 2]);
+    expect(chains.map((c) => labels(c.nodes))).toEqual([
+      ["1.e4", "e5"],
+      ["1.d4", "d5"],
+      ["1.c4", "e5"],
+    ]);
+    expect(chains.every((c) => c.children.length === 0)).toBe(true);
+  });
+
+  it("uses N...san for black moves not preceded by a white move, including null-move and @fen boundaries", () => {
+    const withNull = importRepertoirePgn(base(), "1.e4 Z0 2.Nf3 *");
+    const [nullChain] = buildRepertoireChains(withNull);
+    expect(labels(nullChain.nodes)).toEqual(["1.e4", "--", "2.Nf3"]);
+
+    const blackAfterNullBook = importRepertoirePgn(base(), "1.Z0 e5 *");
+    const [blackAfterNull] = buildRepertoireChains(blackAfterNullBook);
+    expect(labels(blackAfterNull.nodes)).toEqual(["1.--", "e5"]);
+
+    const customBlack = newRepertoire(
+      "Black to move",
+      "black",
+      "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+    );
+    const blackMove = addMove(customBlack, null, "e7", "e5").node;
+    expect(chainMoveLabel(blackMove)).toBe("1...e5");
+    expect(chainMoveLabel(blackMove, blackMove)).toBe("1...e5");
+
+    const fenNode = {
+      ...blackMove,
+      id: "fen-node",
+      uci: "@fen",
+      san: "章节",
+    };
+    expect(chainMoveLabel(fenNode)).toBe(moveLabel(fenNode));
+    expect(chainMoveLabel(blackMove, fenNode)).toBe("1...e5");
+  });
+
+  it("truncates cleanly when branching exceeds maxDepth", () => {
+    const book = importRepertoirePgn(
+      base(),
+      "1.e4 e5 (1...c5 2.Nf3 (2.Nc3 Nc6) d6) 2.Nf3 *",
+    );
+    const chains = buildRepertoireChains(book, 1);
+    const [, sicilian] = chains[0].children;
+    expect(sicilian.head.san).toBe("c5");
+    expect(sicilian.tail.san).toBe("c5");
+    expect(sicilian.truncated).toBe(true);
+    expect(sicilian.children).toEqual([]);
   });
 });
